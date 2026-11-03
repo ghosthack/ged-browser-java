@@ -49,11 +49,12 @@ public enum Labels {
     public String themeLight() { return pick("Light", "Claro"); }
     public String themeDark() { return pick("Dark", "Oscuro"); }
 
-    /// `aged 70` (died at 70) or `age 46` (living); `c.` when a date is approximate.
-    public String age(int years, boolean approx, boolean living) {
-        var c = approx ? "c. " : "";
-        if (this == ES) return c + years + (years == 1 ? " año" : " años");
-        return (living ? "age " : "aged ") + c + years;
+    /// `aged 70` (died at 70) or `age 46` (living); `aged 62–63` when the
+    /// dates allow either; `c.` when a date is approximate.
+    public String age(int min, int max, boolean approx, boolean living) {
+        var n = (approx ? "c. " : "") + (min == max ? String.valueOf(min) : min + "–" + max);
+        if (this == ES) return n + (min == max && min == 1 ? " año" : " años");
+        return (living ? "age " : "aged ") + n;
     }
 
     /// Column heading for a generation: `up` > 0 for ancestors, `down` > 0 for descendants.

@@ -218,4 +218,28 @@ class ChartTest {
         var img = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(bytes));
         assertEquals(0x141619, img.getRGB(2, 2) & 0xffffff);
     }
+
+    @Test
+    void ageFromDateRangesAndRecordedAge() {
+        var today = LocalDate.of(2026, 11, 3);
+        // A range that pins the age down (like a birth worked out from ages in later records).
+        var narrow = Genealogy.of(Fixtures.COUSINS.replace("2 DATE 7 JAN 1910", "2 DATE BET 28 DEC 1909 AND 1 JAN 1910"));
+        assertEquals("aged 80", modernOn(narrow, today).age(narrow.person("I9").orElseThrow()));
+        // A range that straddles the birthday gives both possible ages.
+        var wide = Genealogy.of(Fixtures.COUSINS.replace("2 DATE 7 JAN 1910", "2 DATE BET 1 JAN 1910 AND 31 DEC 1910"));
+        assertEquals("aged 79–80", modernOn(wide, today).age(wide.person("I9").orElseThrow()));
+        // No usable birth date: fall back to the age the death record states.
+        var recorded = Genealogy.of(Fixtures.COUSINS
+                .replace("2 DATE 3 MAR 1820", "2 DATE BEF 1830")
+                .replace("2 DATE ABT 1890", "2 DATE ABT 1890\n2 AGE 69y"));
+        assertEquals("aged 69", modernOn(recorded, today).age(recorded.person("I1").orElseThrow()));
+        // Before/after with nothing recorded: no age rather than a guess.
+        var vague = Genealogy.of(Fixtures.COUSINS.replace("2 DATE 3 MAR 1820", "2 DATE BEF 1830"));
+        assertEquals("", modernOn(vague, today).age(vague.person("I1").orElseThrow()));
+    }
+
+    private static ChartPage modernOn(Genealogy g, LocalDate today) {
+        var c = Layout.build(g, g.person("I9").orElseThrow(), new Layout.Spec(3, 0, true, Labels.EN, Theme.MODERN));
+        return new ChartPage(g, c, Labels.EN, "t", false, today);
+    }
 }

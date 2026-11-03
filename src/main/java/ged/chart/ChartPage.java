@@ -275,31 +275,74 @@ public final class ChartPage {
         return b + " – " + d;
     }
 
-    /// Age at death, or today's age for the living; empty when it can't be
-    /// worked out honestly (no birth year, before/after dates, no death date
-    /// for someone who died, or an implausible result).
+    /// Age at death, or today's age for the living. A `BET … AND …` date
+    /// gives a range of ages: one number when both ends agree, else `62–63`.
+    /// Without usable dates, falls back to an `AGE` recorded on the death
+    /// (as death acts often give). Empty when it can't be worked out
+    /// honestly: before/after dates, no death date for someone who died, or
+    /// an implausible result.
     String age(Person p) {
-        var b = p.birth();
-        if (!b.hasYear() || !usable(b)) return "";
-        boolean living = !p.isDeceased();
-        boolean approx = b.qualifier() == GedDate.Qualifier.ABOUT;
-        int ey, em, ed;
-        if (living) {
-            ey = today.getYear(); em = today.getMonthValue(); ed = today.getDayOfMonth();
-        } else {
-            var d = p.death();
-            if (!d.hasYear() || !usable(d)) return "";
-            approx |= d.qualifier() == GedDate.Qualifier.ABOUT;
-            ey = d.year(); em = d.month(); ed = d.day();
-        }
-        int years = ey - b.year();
-        if (b.month() > 0 && em > 0 && (em < b.month() || (em == b.month() && b.day() > 0 && ed > 0 && ed < b.day()))) years--;
-        if (years < 0 || years > (living ? 105 : 120)) return "";
-        return l.age(years, approx, living);
+        var computed = computedAge(p);
+        if (!computed.isEmpty() || !p.isDeceased()) return computed;
+        return p.event("DEAT").map(e -> recordedAge(e.node().text("AGE"))).orElse("");
     }
 
-    private static boolean usable(GedDate d) {
-        return d.qualifier() == GedDate.Qualifier.EXACT || d.qualifier() == GedDate.Qualifier.ABOUT;
+    private String computedAge(Person p) {
+        var b = bounds(p.birth());
+        if (b == null) return "";
+        boolean living = !p.isDeceased();
+        boolean approx = p.birth().qualifier() == GedDate.Qualifier.ABOUT;
+        GedDate[] d;
+        if (living) {
+            var now = new GedDate("", GedDate.Qualifier.EXACT, today.getYear(), today.getMonthValue(), today.getDayOfMonth());
+            d = new GedDate[] {now, now};
+        } else {
+            d = bounds(p.death());
+            if (d == null) return "";
+            approx |= p.death().qualifier() == GedDate.Qualifier.ABOUT;
+        }
+        int min = years(b[1], d[0]), max = years(b[0], d[1]);
+        if (min < 0 || min > max || max > (living ? 105 : 120)) return "";
+        return l.age(min, max, approx, living);
+    }
+
+    /// Earliest and latest a date can mean; null if it can't pin one down.
+    private static GedDate[] bounds(GedDate d) {
+        if (!d.hasYear()) return null;
+        return switch (d.qualifier()) {
+            case EXACT, ABOUT -> new GedDate[] {d, d};
+            case BETWEEN -> {
+                var parts = d.raw().toUpperCase(Locale.ROOT).replaceAll("@#D[^@]*@\\s*", "")
+                        .replaceFirst("^\\s*BET\\s+", "").split("\\s+AND\\s+");
+                if (parts.length != 2) yield null;
+                var lo = GedDate.parse(parts[0]);
+                var hi = GedDate.parse(parts[1]);
+                boolean ok = lo.hasYear() && hi.hasYear() && lo.qualifier() == GedDate.Qualifier.EXACT
+                        && hi.qualifier() == GedDate.Qualifier.EXACT && lo.compareTo(hi) <= 0;
+                yield ok ? new GedDate[] {lo, hi} : null;
+            }
+            default -> null;
+        };
+    }
+
+    /// Whole years from `from` to `to`; month and day are used when both dates have them.
+    private static int years(GedDate from, GedDate to) {
+        int y = to.year() - from.year();
+        if (from.month() > 0 && to.month() > 0
+                && (to.month() < from.month() || (to.month() == from.month() && from.day() > 0 && to.day() > 0 && to.day() < from.day()))) {
+            y--;
+        }
+        return y;
+    }
+
+    private static final java.util.regex.Pattern AGE = java.util.regex.Pattern.compile("^\\s*(\\d{1,3})\\s*(?:y|yrs?|years?)?\\b.*", java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    /// `62`, `62y`, `62y 3m` → age 62. Anything vaguer (`<1`, `CHILD`) → empty.
+    private String recordedAge(String raw) {
+        var m = AGE.matcher(raw);
+        if (!m.matches()) return "";
+        int n = Integer.parseInt(m.group(1));
+        return n > 120 ? "" : l.age(n, n, false, false);
     }
 
     private static String birthPlace(Person p) {
