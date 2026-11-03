@@ -1,0 +1,221 @@
+package ged.chart;
+
+import ged.Fixtures;
+import ged.chart.Layout.Card;
+import ged.chart.Layout.Kind;
+import ged.model.GedDate;
+import ged.model.Genealogy;
+import org.junit.jupiter.api.Test;
+
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
+import java.util.regex.Pattern;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class ChartTest {
+    private final Genealogy g = Fixtures.cousins();
+
+    private Layout.Chart chart(String root, int up, int down) {
+        return Layout.build(g, g.person(root).orElseThrow(), new Layout.Spec(up, down, true, Labels.EN));
+    }
+
+    private static List<String> keys(Layout.Chart c, Kind kind) {
+        return c.cards().stream().filter(x -> x.kind() == kind).map(x -> x.person().key()).toList();
+    }
+
+    @Test
+    void cousinMarriageDrawsTheSpouseOnceThenAsRepeat() {
+        var c = chart("I1", 0, 9);
+        assertEquals(List.of("I1"), keys(c, Kind.ROOT));
+        assertTrue(keys(c, Kind.SPOUSE).contains("I8"), "Sofia drawn in full as Luca's wife");
+        assertEquals(List.of("I8"), keys(c, Kind.REPEAT), "and again, dashed, as Anna's daughter");
+        assertEquals(9, c.peopleCount());
+        assertEquals(3, c.down());
+    }
+
+    @Test
+    void pedigreeCollapseRepeatsSharedGrandparents() {
+        var c = chart("I9", 9, 0);
+        assertEquals(3, c.up());
+        // Giovanni and Lucia are reached through both Luca and Sofia.
+        assertEquals(2, keys(c, Kind.REPEAT).size());
+        assertTrue(keys(c, Kind.REPEAT).containsAll(List.of("I1", "I2")));
+        assertEquals(List.of("Parents", "Grandparents", "Great-grandparents"),
+                c.columns().stream().map(Layout.Column::label).toList());
+    }
+
+    @Test
+    void ancestorsLeftDescendantsRightAndNothingOverlaps() {
+        var c = chart("I7", 2, 2);
+        var root = c.cards().stream().filter(x -> x.kind() == Kind.ROOT).findFirst().orElseThrow();
+        var father = card(c, "I3");
+        var daughter = card(c, "I9");
+        assertTrue(father.x() < root.x(), "parents to the left");
+        assertTrue(daughter.x() > root.x(), "children to the right");
+        assertEquals(1, keys(c, Kind.ROOT).size(), "root drawn once in an hourglass");
+        for (var a : c.cards()) {
+            for (var b : c.cards()) {
+                if (a == b) continue;
+                boolean overlap = Math.abs(a.x() - b.x()) < Theme.CLASSIC.cardW() && Math.abs(a.y() - b.y()) < Theme.CLASSIC.cardH();
+                assertFalse(overlap, a.person().key() + " overlaps " + b.person().key());
+            }
+        }
+        for (var x : c.cards()) {
+            assertTrue(x.x() >= 0 && x.y() >= 0 && x.x() + Theme.CLASSIC.cardW() <= c.width() && x.y() + Theme.CLASSIC.cardH() <= c.height());
+        }
+    }
+
+    @Test
+    void parentIsCentredBetweenItsParents() {
+        var c = chart("I9", 1, 0);
+        var mid = (card(c, "I7").y() + card(c, "I8").y()) / 2;
+        assertEquals(mid, card(c, "I9").y(), 0.01);
+    }
+
+    @Test
+    void depthLimitsGenerations() {
+        var c = chart("I1", 0, 1);
+        assertFalse(c.cards().stream().anyMatch(x -> x.person().key().equals("I7")));
+        assertEquals(1, c.down());
+    }
+
+    @Test
+    void htmlIsSelfContainedAndEscaped() {
+        var hostile = Genealogy.of(Fixtures.COUSINS.replace("Elena /Rossi/", "Elena </script><b>&\" /Rossi/"));
+        var c = Layout.build(hostile, hostile.person("I9").orElseThrow(), new Layout.Spec(2, 2, true, Labels.EN));
+        var html = new ChartPage(hostile, c, Labels.EN, "Our <family>", false, LocalDate.of(2026, 11, 3)).html(false);
+        assertEquals(1, html.split("</script>", -1).length - 1, "only the page's own closing script tag");
+        assertTrue(html.contains("<title>Our &lt;family&gt;</title>"));
+        assertTrue(html.contains("made 3 Nov 2026"));
+        var urls = Pattern.compile("https?://[^\"' )]+").matcher(html).results().map(r -> r.group()).distinct().toList();
+        assertEquals(List.of("http://www.w3.org/2000/svg"), urls, "no external resources");
+    }
+
+    @Test
+    void notesOnlyWhenAsked() {
+        var c = chart("I3", 0, 1);
+        assertFalse(new ChartPage(g, c, Labels.EN, "t", false, LocalDate.now()).html(false).contains("Went to sea"));
+        assertTrue(new ChartPage(g, c, Labels.EN, "t", true, LocalDate.now()).html(false).contains("Went to sea"));
+    }
+
+    @Test
+    void spanishLabelsAndDates() {
+        assertEquals("hacia 12 jun 1850", Labels.ES.fullDate(GedDate.parse("ABT 12 JUN 1850")));
+        assertEquals("between 1800 and 1810", Labels.EN.fullDate(GedDate.parse("BET 1800 AND 1810")));
+        assertEquals("c. 1850", Labels.EN.year(GedDate.parse("ABT 1850")));
+        assertEquals("Bisabuelos", Labels.ES.generation(3, true));
+        assertEquals("2nd great-grandchildren", Labels.EN.generation(4, false));
+        var es = Layout.build(g, g.person("I9").orElseThrow(), new Layout.Spec(2, 0, true, Labels.ES));
+        var html = new ChartPage(g, es, Labels.ES, "Árbol", false, LocalDate.of(2026, 1, 5)).html(false);
+        assertTrue(html.contains("lang=\"es\"") && html.contains("ABUELOS"));
+        assertTrue(html.contains("creado el 5 ene 2026"));
+    }
+
+    @Test
+    void jsonEscapes() {
+        assertEquals("{\"a\":[\"x\\\"y\",\"l1\\nl2\"]}", ChartPage.json(Map.of("a", List.of("x\"y", "l1\nl2"))));
+    }
+
+    private static Card card(Layout.Chart c, String key) {
+        return c.cards().stream().filter(x -> x.person().key().equals(key) && x.kind() != Kind.REPEAT)
+                .findFirst().orElseThrow(() -> new AssertionError("no card for " + key));
+    }
+
+    @Test
+    void pngScaleIsCappedForHugeCharts() {
+        System.setProperty("java.awt.headless", "true");
+        var png = new PngChart(new ChartPage(g, chart("I9", 3, 3), Labels.EN, "t", false, LocalDate.now()), false);
+        assertEquals(2.0, png.effectiveScale(2.0), 1e-9, "small chart keeps full resolution");
+        assertTrue(png.effectiveScale(1e6) < 1e6, "absurd scale is capped by the pixel budget");
+    }
+
+    @Test
+    void flagsComeFromTheBirthplace() {
+        assertEquals("ar", code("Rosario, Santa Fe, Argentina"));
+        assertEquals("es", code("Toledo, Castilla-La Mancha, España"));
+        assertEquals("it", code("Torino, Piemonte, Italia"));
+        assertEquals("us", code("Springfield, USA"));
+        assertEquals("us", code("Boston, Massachusetts, United States of America"));
+        assertEquals("sct", code("Aberdeen, Scotland"));
+        assertEquals("sct", code("Glasgow"));
+        assertEquals("ar", code("Concordia, Entre Ríos"));
+        assertEquals("mx", code("Tijuana, Baja California, México"), "the country wins over a region elsewhere");
+        assertEquals("", code("Somewhere"));
+        assertEquals("", code(""));
+    }
+
+    @Test
+    void flagsAreDrawnOncePerCountryAndUsedOnCards() {
+        var svg = new ChartPage(g, chart("I9", 9, 0), Labels.EN, "t", false, LocalDate.now()).svg(false, ChartPage.Colors.LIGHT);
+        assertEquals(1, svg.split("<symbol id=\"flag-it\"", -1).length - 1, "Italian flag defined once");
+        assertTrue(svg.contains("href=\"#flag-it\""), "used by Giovanni (Genova, Italia)");
+        assertTrue(svg.contains("href=\"#flag-es\""), "used by José (Sevilla, España)");
+    }
+
+    private static String code(String place) {
+        return Flags.forPlace(place).map(Flags.Flag::code).orElse("");
+    }
+
+    // ---- modern theme ------------------------------------------------------
+
+    private ChartPage modern(String root, int up, int down, LocalDate today) {
+        var c = Layout.build(g, g.person(root).orElseThrow(), new Layout.Spec(up, down, true, Labels.EN, Theme.MODERN));
+        return new ChartPage(g, c, Labels.EN, "t", false, today);
+    }
+
+    @Test
+    void agesAreWorkedOutOnlyWhenHonest() {
+        var page = modern("I9", 2, 0, LocalDate.of(2026, 11, 3));
+        assertEquals("aged 79", page.age(g.person("I9").orElseThrow()), "7 Jan 1910 – 2 Jan 1990: a few days short of 80");
+        assertEquals("aged c. 70", page.age(g.person("I1").orElseThrow()), "1820 – ABT 1890");
+        assertEquals("", page.age(g.person("I3").orElseThrow()), "no death recorded and born 1850: not 176 years old");
+        var living = Genealogy.of(Fixtures.COUSINS.replace("2 DATE 7 JAN 1910\n1 DEAT\n2 DATE 2 JAN 1990\n", "2 DATE 7 JAN 1980\n"));
+        var c = Layout.build(living, living.person("I9").orElseThrow(), new Layout.Spec(0, 0, true, Labels.ES, Theme.MODERN));
+        assertEquals("46 años", new ChartPage(living, c, Labels.ES, "t", false, LocalDate.of(2026, 11, 3)).age(living.person("I9").orElseThrow()));
+    }
+
+    @Test
+    void modernCardsShowIdAgeAndLargeFlag() {
+        var svg = modern("I9", 2, 0, LocalDate.now()).svg(false, ChartPage.Colors.LIGHT);
+        assertTrue(svg.contains(">I9</text>"), "record id on the card");
+        assertTrue(svg.contains("aged 79"), "age on the card");
+        assertTrue(Pattern.compile("href=\"#flag-it\" x=\"[\\d.]+\" y=\"13\" width=\"30\" height=\"20\"").matcher(svg).find(), "large flag");
+        assertTrue(svg.contains(">EV</text>") || svg.contains(">ER</text>"), "initials avatar");
+        assertFalse(svg.contains("var(--c-"), "standalone colours are fixed");
+    }
+
+    @Test
+    void modernCardsDoNotOverlap() {
+        var page = modern("I7", 3, 3, LocalDate.now());
+        var cards = page.chart().cards();
+        double w = Theme.MODERN.cardW(), h = Theme.MODERN.cardH();
+        for (var a : cards) for (var b : cards) {
+            if (a != b) assertFalse(Math.abs(a.x() - b.x()) < w && Math.abs(a.y() - b.y()) < h, a.person().key() + "/" + b.person().key());
+        }
+    }
+
+    @Test
+    void modernHtmlSwitchesLightAndDarkButPrintsLight() {
+        var html = modern("I9", 2, 2, LocalDate.now()).html(false);
+        assertTrue(html.contains("@media (prefers-color-scheme:dark){:root:not([data-theme=light]){"));
+        assertTrue(html.contains(":root[data-theme=dark]{"));
+        assertTrue(html.contains("@media print{:root,"), "print is always light");
+        assertTrue(html.contains("id=\"tm\""), "theme switch button");
+        assertTrue(html.contains("var(--c-card,#ffffff)"), "cards follow the palette");
+        assertTrue(modern("I9", 2, 2, LocalDate.now()).html(true).contains("<html lang=\"en\" data-theme=\"dark\">"));
+        var classic = new ChartPage(g, chart("I9", 2, 2), Labels.EN, "t", false, LocalDate.now()).html(false);
+        assertFalse(classic.contains("id=\"tm\"") || classic.contains("prefers-color-scheme"), "classic stays light");
+    }
+
+    @Test
+    void darkPngUsesDarkPaper() throws Exception {
+        System.setProperty("java.awt.headless", "true");
+        var bytes = new PngChart(modern("I9", 1, 1, LocalDate.now()), true).png(1);
+        var img = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(bytes));
+        assertEquals(0x141619, img.getRGB(2, 2) & 0xffffff);
+    }
+}
