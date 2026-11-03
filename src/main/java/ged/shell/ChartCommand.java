@@ -5,6 +5,7 @@ import ged.chart.Labels;
 import ged.chart.Layout;
 import ged.chart.PngChart;
 import ged.chart.Theme;
+import ged.chart.Timeline;
 import ged.model.Genealogy;
 import ged.model.Person;
 import ged.vfs.Location;
@@ -22,6 +23,7 @@ final class ChartCommand implements Command {
     private final Options opts = new Options()
             .flag("a", "ancestors", "ancestors only")
             .flag("d", "descendants", "descendants only")
+            .flag(null, "timeline", "draw lives on a time axis instead of a tree")
             .value("n", "depth", "N", "generations each way (default 4)")
             .flag(null, "all", "no depth limit")
             .flag("S", "no-spouses", "don't draw partners of descendants")
@@ -39,7 +41,7 @@ final class ChartCommand implements Command {
     @Override
     public String usage() {
         return """
-                chart [-a|-d] [-n N|--all] [-S] [-o FILE] [--scale N] [-t TITLE] [--lang en|es] [--notes]
+                chart [-a|-d] [--timeline] [-n N|--all] [-S] [-o FILE] [--scale N] [-t TITLE] [--lang en|es] [--notes]
                       [--theme classic|modern] [--dark] [PATH]
 
                 Draws PATH (default: current person) with ancestors to the left and
@@ -63,6 +65,14 @@ final class ChartCommand implements Command {
                   chart -d --all -o family.svg   every descendant, as a scalable image
                   chart --dark -o arbol.png      a dark picture
                   chart --theme classic          the original look
+
+                --timeline draws everyone on a time axis instead: one bar per life,
+                from birth to death (or to today), so longer lives are longer bars,
+                and each child branches off its parents' bars in the year it was
+                born. Missing dates are estimated from relatives and drawn pale.
+
+                  chart --timeline               the same people, as lifelines
+                  chart --timeline -d --all -o descendientes.png --lang es
 
                 A PNG is drawn at 2× for sharp printing; very large charts are drawn
                 at a lower resolution so the image stays a manageable size.
@@ -97,11 +107,19 @@ final class ChartCommand implements Command {
 
         var spec = new Layout.Spec(o.has("descendants") ? 0 : depth, o.has("ancestors") ? 0 : depth,
                 !o.has("no-spouses"), labels, theme);
-        var chart = Layout.build(ctx.g(), root, spec);
-        var title = o.get("title").orElse(labels.title(root.name().display()));
+        boolean timeline = o.has("timeline");
+        if (timeline && !theme.modern()) throw new CommandException("--timeline has only the modern look; drop --theme classic");
+        Layout.Chart chart;
+        try {
+            chart = timeline ? Timeline.build(ctx.g(), root, spec, LocalDate.now()) : Layout.build(ctx.g(), root, spec);
+        } catch (IllegalArgumentException e) {
+            throw new CommandException(e.getMessage());
+        }
+        var who = root.name().display();
+        var title = o.get("title").orElse(timeline ? labels.timelineTitle(who) : labels.title(who));
         var page = new ChartPage(ctx.g(), chart, labels, title, o.has("notes"), LocalDate.now());
 
-        var target = Path.of(o.get("output").orElse(slug(root) + "-tree.html"));
+        var target = Path.of(o.get("output").orElse(slug(root) + (timeline ? "-timeline.html" : "-tree.html")));
         var file = target.getFileName().toString().toLowerCase(Locale.ROOT);
         if (file.endsWith(".ged") || isSource(ctx.g(), target)) {
             throw new CommandException("refusing to overwrite a GEDCOM file; choose a .html or .svg name");

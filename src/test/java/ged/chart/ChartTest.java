@@ -238,6 +238,74 @@ class ChartTest {
         assertEquals("", modernOn(vague, today).age(vague.person("I1").orElseThrow()));
     }
 
+    // ---- timeline ----------------------------------------------------------
+
+    private Layout.Chart timeline(String root, int up, int down) {
+        return Timeline.build(g, g.person(root).orElseThrow(), new Layout.Spec(up, down, true, Labels.EN, Theme.MODERN),
+                LocalDate.of(2026, 11, 3));
+    }
+
+    @Test
+    void timelineBarsAreAsLongAsTheLifeAndChildrenBranchAtBirth() {
+        var c = timeline("I9", 1, 0);
+        assertTrue(c.timeline());
+        var elena = card(c, "I9");
+        var luca = card(c, "I7");
+        var sofia = card(c, "I8");
+        // Father above, mother below: both parents next to the child they join.
+        assertTrue(luca.y() < elena.y() && elena.y() < sofia.y());
+        // 7 Jan 1910 – 2 Jan 1990: a solid bar of just under 80 years.
+        assertEquals(80 * Timeline.PX, elena.span().solidTo() - elena.span().solidFrom(), Timeline.PX * 0.1);
+        assertEquals(elena.span().end(), elena.span().solidTo(), 1e-9, "nothing estimated");
+        // Born 30 years after Luca: her line leaves his bar there and lands where hers starts.
+        assertEquals(elena.x() - luca.x(), (1910 + 6 / 365.25 - 1880.5) * Timeline.PX, 0.01);
+        assertTrue(c.links().stream().allMatch(k -> k.x1() == k.x2()), "straight down");
+        assertTrue(c.links().stream().anyMatch(k -> k.x1() == elena.x() && k.y1() < elena.y() && k.y2() > elena.y()));
+        assertEquals(List.of(elena.x() - luca.x()), luca.span().branches());
+        assertEquals(1, c.guides().stream().filter(Layout.Guide::today).count());
+        assertEquals("Today", c.columns().getLast().label());
+    }
+
+    @Test
+    void timelineEstimatesMissingDatesAndDrawsThemPale() {
+        var c = timeline("I9", 3, 0);
+        // Paolo has no dates at all: placed from his wife's birth, solid only from his first known fact.
+        var paolo = card(c, "I6").span();
+        assertTrue(paolo.solidFrom() > 0, "estimated birth drawn pale");
+        // Lucia's death isn't recorded: her bar fades out after the last thing known.
+        var lucia = card(c, "I2").span();
+        assertTrue(lucia.end() > lucia.solidTo());
+        assertEquals(2, keys(c, Kind.REPEAT).size(), "pedigree collapse: shared great-grandparents again, dashed");
+
+        var page = new ChartPage(g, c, Labels.EN, "t", false, LocalDate.of(2026, 11, 3));
+        var html = page.html(false);
+        assertTrue(html.contains("Pale: dates estimated") && html.contains(">TODAY<"));
+        assertTrue(page.width() >= c.width(), "room for labels past the last bar");
+    }
+
+    @Test
+    void timelineDescendantsAndPng() throws Exception {
+        var c = timeline("I1", 0, 9);
+        var luca = card(c, "I7");
+        var sofia = c.cards().stream().filter(x -> x.person().key().equals("I8") && x.kind() == Kind.SPOUSE).findFirst().orElseThrow();
+        assertEquals(luca.y() + Timeline.ROW, sofia.y(), "partner right under");
+        assertEquals(1, c.ties().stream().filter(t -> t.y1() < sofia.y() + Timeline.ROW && t.y2() > luca.y()).count());
+        for (var a : c.cards()) for (var b : c.cards()) if (a != b) assertTrue(a.y() != b.y(), "one person per row");
+
+        System.setProperty("java.awt.headless", "true");
+        var page = new ChartPage(g, c, Labels.EN, "t", false, LocalDate.of(2026, 11, 3));
+        var img = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(new PngChart(page, true).png(1)));
+        assertEquals(0x141619, img.getRGB(2, 2) & 0xffffff, "dark paper");
+    }
+
+    @Test
+    void timelineNeedsSomeDate() {
+        var undated = Genealogy.of("0 HEAD\n0 @I1@ INDI\n1 NAME A /B/\n0 TRLR\n");
+        var e = org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () ->
+                Timeline.build(undated, undated.person("I1").orElseThrow(), new Layout.Spec(2, 2, true, Labels.EN, Theme.MODERN), LocalDate.now()));
+        assertTrue(e.getMessage().contains("no birth"));
+    }
+
     private static ChartPage modernOn(Genealogy g, LocalDate today) {
         var c = Layout.build(g, g.person("I9").orElseThrow(), new Layout.Spec(3, 0, true, Labels.EN, Theme.MODERN));
         return new ChartPage(g, c, Labels.EN, "t", false, today);

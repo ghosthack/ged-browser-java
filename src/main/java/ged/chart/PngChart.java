@@ -58,7 +58,7 @@ public final class PngChart {
         return Math.min(requested, Math.sqrt(MAX_PIXELS / (width() * height())));
     }
 
-    private double width() { return Math.max(page.chart().width(), 520); }
+    private double width() { return Math.max(page.width(), 520); }
     private double height() { return page.chart().height() + 64; }
 
     private Color color(String key) {
@@ -112,6 +112,14 @@ public final class PngChart {
                 g.drawString(label, (float) (c.centerX() - tw / 2), (float) (Layout.MARGIN + 10));
             }
 
+            for (var gd : page.chart().guides()) {
+                g.setColor(color(gd.today() ? "accent" : "line"));
+                g.setStroke(gd.today()
+                        ? new BasicStroke(1.5f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10f, new float[] {5, 4}, 0)
+                        : new BasicStroke(1f));
+                g.draw(new Line2D.Double(gd.x(), gd.y1(), gd.x(), gd.y2()));
+            }
+
             g.setColor(color("accent"));
             g.setStroke(new BasicStroke(2f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10f, new float[] {2, 2}, 0));
             for (var t : page.chart().ties()) g.draw(new Line2D.Double(t.x1(), t.y1(), t.x2(), t.y2()));
@@ -159,8 +167,10 @@ public final class PngChart {
         switch (m) {
             case Box b -> {
                 var shape = new RoundRectangle2D.Double(b.x(), b.y(), b.w(), b.h(), 2 * b.r(), 2 * b.r());
-                g.setColor(color(b.fill()));
-                g.fill(shape);
+                if (b.fill() != null) {
+                    g.setColor(color(b.fill()));
+                    g.fill(shape);
+                }
                 if (b.stroke() != null) {
                     g.setColor(color(b.stroke()));
                     g.setStroke(b.dashed()

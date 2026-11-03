@@ -84,7 +84,23 @@ public final class ChartPage {
     record FlagMark(Flags.Flag flag, double x, double y, double w, double h) implements Mark {}
 
     List<Mark> marks(Card c) {
+        if (c.span() != null) return timelineMarks(c);
         return theme.modern() ? modernMarks(c) : classicMarks(c);
+    }
+
+    private double width = -1;
+
+    /// Chart width, widened on a timeline so labels running past the last bar fit.
+    double width() {
+        if (width < 0) {
+            width = chart.width();
+            if (chart.timeline()) {
+                for (var c : chart.cards()) {
+                    for (var m : marks(c)) if (m instanceof Box b) width = Math.max(width, c.x() + b.x() + b.w() + Layout.MARGIN);
+                }
+            }
+        }
+        return width;
     }
 
     private static String sexKey(Person p) {
@@ -195,6 +211,46 @@ public final class ChartPage {
             y -= 2;
         }
         if (!place.isEmpty()) out.add(Txt.of(place, "pl", x, y));
+        return out;
+    }
+
+    /// A timeline row: a label (flag, name, years, age, id) sitting on a
+    /// paper chip so lines passing behind don't run through the text, and
+    /// below it the life bar — pale where dates are estimated, with a
+    /// notch wherever a child's line leaves it.
+    private List<Mark> timelineMarks(Card c) {
+        var p = c.person();
+        var s = c.span();
+        var sex = sexKey(p);
+        boolean root = c.kind() == Kind.ROOT, repeat = c.kind() == Kind.REPEAT;
+        var out = new ArrayList<Mark>();
+
+        var runs = new ArrayList<Run>();
+        runs.add(new Run(p.name().full().isEmpty() ? l.unnamed() : p.name().full(), "nm", null));
+        var years = years(p);
+        var age = age(p);
+        if (!years.isEmpty()) runs.add(new Run("   " + years, "yr", null));
+        if (!age.isEmpty()) runs.add(new Run((years.isEmpty() ? "   " : "  ·  ") + age, "age", null));
+        c.family().map(this::marriageTag).ifPresent(tag -> runs.add(new Run("    " + tag, "tag", null)));
+        runs.add(new Run("    " + p.key(), "id", null));
+        if (repeat) runs.add(new Run("   " + l.repeat(), "pl", null));
+        double textW = runs.stream().mapToDouble(r -> measure(r.text(), theme.font(r.style()))).sum();
+
+        double lx = Timeline.LABEL_X;
+        var flag = repeat ? Optional.<Flags.Flag>empty() : Flags.forPlace(birthPlace(p));
+        double tx = lx + (flag.isPresent() ? 27 : 0);
+        out.add(new Box(lx - 4, 0, tx - lx + textW + 12, 22, 6, "paper", null, 0, false, null));
+        flag.ifPresent(f -> out.add(new FlagMark(f, lx, 4.5, 21, 14)));
+        out.add(new Txt(runs, tx, 16.5, "start", 0));
+
+        double y = Timeline.BAR_Y, h = Timeline.BAR_H, r = h / 2;
+        out.add(new Box(0, y, s.end(), h, r, sex + "Bg", null, 0, false, null));
+        if (s.solidTo() - s.solidFrom() >= 1) {
+            out.add(new Box(s.solidFrom(), y, s.solidTo() - s.solidFrom(), h, r, sex, null, 0, false, null));
+        }
+        for (double bx : s.branches()) out.add(new Dot(bx, y + h / 2, 2.1, "paper"));
+        // Outline on top: hover/selection target, gold for the root, dashed for a repeat.
+        out.add(new Box(0, y, s.end(), h, r, null, root ? "accent" : repeat ? sex : null, root ? 2 : 1.4, repeat, "bg"));
         return out;
     }
 
@@ -390,7 +446,7 @@ public final class ChartPage {
     /// standalone .svg file); the HTML page has its own heading instead.
     public String svg(boolean heading, Colors mode) {
         double top = heading ? 64 : 0;
-        double w = Math.max(chart.width(), heading ? 520 : 0), h = chart.height() + top;
+        double w = Math.max(width(), heading ? 520 : 0), h = chart.height() + top;
         var sb = new StringBuilder();
         sb.append("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ").append(n(w)).append(' ').append(n(h))
                 .append("\" width=\"").append(n(w)).append("\" height=\"").append(n(h)).append("\" role=\"img\" aria-label=\"")
@@ -409,6 +465,11 @@ public final class ChartPage {
             sb.append("<text x=\"").append(n(c.centerX())).append("\" y=\"").append(n(Layout.MARGIN + 10))
                     .append("\" text-anchor=\"middle\" style=\"").append(fontStyle("col", null, mode)).append("\">")
                     .append(esc(label)).append("</text>\n");
+        }
+        for (var gd : chart.guides()) {
+            sb.append("<line x1=\"").append(n(gd.x())).append("\" y1=\"").append(n(gd.y1())).append("\" x2=\"").append(n(gd.x()))
+                    .append("\" y2=\"").append(n(gd.y2())).append("\" style=\"stroke:").append(color(gd.today() ? "accent" : "line", mode))
+                    .append(gd.today() ? ";stroke-width:1.5;stroke-dasharray:5 4" : ";stroke-width:1").append("\"/>\n");
         }
         for (var t : chart.ties()) {
             sb.append("<line x1=\"").append(n(t.x1())).append("\" y1=\"").append(n(t.y1())).append("\" x2=\"").append(n(t.x2()))
@@ -435,7 +496,7 @@ public final class ChartPage {
                     sb.append("<rect").append(b.cls() == null ? "" : " class=\"" + b.cls() + "\"")
                             .append(" x=\"").append(n(b.x())).append("\" y=\"").append(n(b.y()))
                             .append("\" width=\"").append(n(b.w())).append("\" height=\"").append(n(b.h()))
-                            .append("\" rx=\"").append(n(b.r())).append("\" style=\"fill:").append(color(b.fill(), mode));
+                            .append("\" rx=\"").append(n(b.r())).append("\" style=\"fill:").append(b.fill() == null ? "none" : color(b.fill(), mode));
                     if (b.stroke() != null) {
                         sb.append(";stroke:").append(color(b.stroke(), mode)).append(";stroke-width:").append(n(b.strokeW()));
                         if (b.dashed()) sb.append(";stroke-dasharray:5 4");
@@ -536,6 +597,8 @@ public final class ChartPage {
                 .replace("{{male}}", esc(l.male()))
                 .replace("{{female}}", esc(l.female()))
                 .replace("{{repeat}}", esc(l.repeatLegend()))
+                .replace("{{extraLegend}}", chart.timeline()
+                        ? "<span><i style=\"background:var(--c-unknownBg)\"></i>" + esc(l.estimated()) + "</span>" : "")
                 .replace("{{themeButton}}", themeButton)
                 .replace("{{labels}}", json(Map.of("parents", l.parents(), "spouses", l.spouses(),
                         "children", l.children(), "notes", l.notes(), "none", l.noFacts(),
@@ -738,7 +801,7 @@ public final class ChartPage {
             <div class="legend">
               <span><i style="background:var(--c-male)"></i>{{male}}</span>
               <span><i style="background:var(--c-female)"></i>{{female}}</span>
-              <span><i class="dash"></i>{{repeat}}</span>
+              <span><i class="dash"></i>{{repeat}}</span>{{extraLegend}}
               <span class="hint">{{hint}}</span>
             </div>
             <div id="wrap">

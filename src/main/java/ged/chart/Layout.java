@@ -24,16 +24,28 @@ public final class Layout {
 
     public enum Kind { ROOT, PERSON, SPOUSE, REPEAT }
 
-    /// One drawn card. `family` is the marriage a spouse card stands for.
-    public record Card(Person person, Kind kind, Optional<Family> family, double x, double y) {}
+    /// One drawn card. `family` is the marriage a spouse card stands for;
+    /// `span` is the life bar when the card is a [Timeline] row (else null).
+    public record Card(Person person, Kind kind, Optional<Family> family, double x, double y, Timeline.Span span) {
+        public Card(Person person, Kind kind, Optional<Family> family, double x, double y) {
+            this(person, kind, family, x, y, null);
+        }
+    }
 
     /// A connector from a card's edge (x1, y1) to a relative's edge (x2, y2).
     public record Link(double x1, double y1, double x2, double y2) {}
 
     public record Column(double centerX, String label) {}
 
+    /// A vertical background line: a decade on a timeline, or `today`.
+    public record Guide(double x, double y1, double y2, boolean today) {}
+
     public record Chart(Person root, List<Card> cards, List<Link> links, List<Link> ties, List<Column> columns,
-                        double width, double height, int up, int down, Theme theme) {
+                        List<Guide> guides, double width, double height, int up, int down, Theme theme) {
+        public boolean timeline() {
+            return !cards.isEmpty() && cards.getFirst().span() != null;
+        }
+
         public int peopleCount() {
             return (int) cards.stream().filter(c -> c.kind() != Kind.REPEAT).map(c -> c.person().id()).distinct().count();
         }
@@ -117,7 +129,7 @@ public final class Layout {
 
         double w = placed.stream().mapToDouble(c -> c.x() + cardW).max().orElse(0) + MARGIN;
         double h = placed.stream().mapToDouble(c -> c.y() + cardH).max().orElse(0) + MARGIN;
-        return new Chart(root, placed, moved, movedTies, columns, w, h, reach[0], reach[1], spec.theme);
+        return new Chart(root, placed, moved, movedTies, columns, List.of(), w, h, reach[0], reach[1], spec.theme);
     }
 
     // ---- building the trees ---------------------------------------------

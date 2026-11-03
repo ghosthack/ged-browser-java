@@ -25,6 +25,9 @@ public enum Labels {
     private String pick(String en, String es) { return this == EN ? en : es; }
 
     public String title(String name) { return pick("Family tree of ", "Árbol genealógico de ") + name; }
+    public String timelineTitle(String name) { return pick("Family timeline of ", "Línea de tiempo familiar de ") + name; }
+    public String today() { return pick("Today", "Hoy"); }
+    public String estimated() { return pick("Pale: dates estimated", "Claro: fechas estimadas"); }
     public String people(int n) { return n + pick(n == 1 ? " person" : " people", n == 1 ? " persona" : " personas"); }
     public String generations(int n) { return n + pick(n == 1 ? " generation" : " generations", n == 1 ? " generación" : " generaciones"); }
     public String made(LocalDate d) { return pick("made ", "creado el ") + date(d.getDayOfMonth(), d.getMonthValue(), d.getYear()); }
