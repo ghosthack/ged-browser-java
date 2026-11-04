@@ -26,11 +26,13 @@ import java.util.Set;
 public final class Sephirot {
     /// Medallion radius and diameter; space between neighbours; row pitch.
     public static final double R = 72, D = 2 * R, GAP = 88, ROW = 264;
-    /// Room above the top row for a medallion's caption, and beside for its sign.
-    static final double CAPTION = 26, SIDE = 18;
+    /// Room above the top row, and beside the outer medallions, for their flags.
+    static final double CAPTION = 10, SIDE = 18;
     /// How far below a couple's centres their children's channels fan out,
     /// and how far above a child's centre its channel turns to drop straight in.
     static final double STEM = R + 26, DROP = R + 40;
+    /// Rays keep at least this angle (radians) from the channels beside them at the root.
+    static final double RAY_ANGLE = 0.06;
 
     private Sephirot() {}
 
@@ -87,6 +89,8 @@ public final class Sephirot {
                 for (int i = tiesBefore; i < ties.size(); i++) { ties.get(i)[0] += shift; ties.get(i)[2] += shift; }
             }
 
+            if (anc != null) rays(rootX);
+
             double minX = spots.stream().mapToDouble(Spot::cx).min().orElse(0) - R;
             double maxX = spots.stream().mapToDouble(Spot::cx).max().orElse(0) + R;
             int top = spots.stream().mapToInt(Spot::gen).max().orElse(0);
@@ -106,6 +110,38 @@ public final class Sephirot {
             double w = maxX + dx + SIDE + Layout.MARGIN;
             double h = Layout.MARGIN + CAPTION + (top - bottom) * ROW + D + Layout.MARGIN;
             return new Chart(root, cards, outLinks, outTies, List.of(), List.of(), w, h, top, -bottom, spec.theme());
+        }
+
+        /// Rays, as on the old plates: a long channel from the root, the sun of the
+        /// chart, straight up to every ancestor from the grandparents on, crossing the
+        /// channels between. Skipped only where the line would pass behind another
+        /// medallion (and so seem to join it), or would leave the root almost on top
+        /// of a channel already there.
+        void rays(double rootX) {
+            var leaving = new ArrayList<Double>();
+            for (var s : spots) if (s.gen == 1) leaving.add(Math.atan2(-ROW, s.cx - rootX));
+            var far = spots.stream().filter(s -> s.gen >= 2 && s.kind != Kind.REPEAT)
+                    .sorted(java.util.Comparator.comparingInt(Spot::gen)).toList();
+            for (var s : far) {
+                double y = -s.gen * ROW;
+                boolean clear = true;
+                for (var o : spots) {
+                    if (o == s || (o.gen == 0 && Math.abs(o.cx - rootX) < 1)) continue;
+                    if (distance(o.cx, -o.gen * ROW, rootX, 0, s.cx, y) < R + 14) { clear = false; break; }
+                }
+                double angle = Math.atan2(y, s.cx - rootX);
+                for (double d : leaving) if (Math.abs(angle - d) < RAY_ANGLE) clear = false;
+                if (!clear) continue;
+                leaving.add(angle);
+                links.add(new double[] {rootX, 0, s.cx, s.gen, 1, 1});
+            }
+        }
+
+        /// Distance from (px, py) to the segment (x1, y1)–(x2, y2).
+        static double distance(double px, double py, double x1, double y1, double x2, double y2) {
+            double dx = x2 - x1, dy = y2 - y1, len2 = dx * dx + dy * dy;
+            double t = len2 == 0 ? 0 : Math.clamp(((px - x1) * dx + (py - y1) * dy) / len2, 0, 1);
+            return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
         }
 
         /// The straight line between two points, cut back to the rim at each end that is a medallion's centre.

@@ -422,21 +422,31 @@ class ChartTest {
         var page = new ChartPage(g, c, Labels.EN, "The Rossi family", false, LocalDate.of(2026, 11, 3));
         var marco = page.marks(card(c, "I3"));
         var rings = marco.stream().filter(m -> m instanceof ChartPage.Ring).map(m -> (ChartPage.Ring) m).toList();
-        assertEquals(List.of("* 12 JUN 1850 · GENOVA"), rings.stream().map(ChartPage.Ring::text).toList());
+        assertEquals(List.of("* 12 JUN 1850 ∙ GENOVA"), rings.stream().map(ChartPage.Ring::text).toList());
         assertTrue(rings.getFirst().top(), "shortened to the town to fit the ring");
-        assertTrue(marco.stream().anyMatch(m -> m instanceof ChartPage.Txt t && t.runs().getFirst().text().equals("GRANDFATHER")));
-        assertTrue(marco.stream().anyMatch(m -> m instanceof ChartPage.FlagMark), "born in Genova: Italy's flag");
+        assertTrue(marco.stream().noneMatch(m -> m instanceof ChartPage.Txt t && t.y() < 0), "no caption over the medallion: the channels say it");
+        var flag = marco.stream().filter(m -> m instanceof ChartPage.FlagMark).map(m -> (ChartPage.FlagMark) m).findFirst().orElseThrow();
+        assertEquals(Ornaments.Escutcheon.ROUND, flag.clip(), "born in Genova: Italy's flag, round");
+        double fx = flag.x() + flag.w() / 2, fy = flag.y() + flag.h() / 2;
+        assertTrue(Math.hypot(fx - Sephirot.R, fy - Sephirot.R) > Sephirot.R + 8 && fx > Sephirot.R && fy < Sephirot.R,
+                "outside the ring, upper right, where the sign used to be");
         var elena = page.marks(card(c, "I9"));
         assertTrue(elena.stream().anyMatch(m -> m instanceof ChartPage.Ring r && !r.top() && r.text().equals("† 2 JAN 1990")));
         assertTrue(elena.stream().filter(m -> m instanceof ChartPage.Orn o && "accent".equals(o.stroke())).count() > 40, "the root is crowned with rays");
-        assertTrue(elena.stream().noneMatch(m -> m instanceof ChartPage.Txt t && t.y() < 0 && !t.runs().getFirst().text().isEmpty()
-                && Character.isLetter(t.runs().getFirst().text().charAt(0))), "no caption on the root");
         assertTrue(page.linkMarks().stream().anyMatch(m -> m instanceof ChartPage.Txt t && t.runs().getFirst().text().equals("∞ 1848")),
                 "Giovanni and Lucia's channel carries their marriage year");
+        var along = page.linkMarks().stream().filter(m -> m instanceof ChartPage.Slant).map(m -> (ChartPage.Slant) m).toList();
+        assertTrue(along.stream().anyMatch(t -> t.text().equals("FATHER")) && along.stream().anyMatch(t -> t.text().equals("MOTHER")),
+                "channels say what their upper end is to their lower end");
+        for (var t : along) assertTrue(Math.abs(t.angle()) <= Math.PI / 2 + 1e-9, "upright: " + t);
 
         var svg = page.svg(true, ChartPage.Colors.DARK);
         assertTrue(svg.contains("<textPath href=\"#ring1\" startOffset=\"50%\""), "ring text set on a path");
-        assertTrue(svg.contains(">THE ROSSI</text>") && svg.contains(">FAMILY</text>"), "title split around the disc");
+        assertTrue(svg.contains("text-anchor=\"middle\">* 12 JUN 1850 ∙ GENOVA</textPath>"), "browsers set the birth sign mid-line themselves");
+        assertTrue(svg.contains("<clipPath id=\"arms-round\""), "flags cut round");
+        assertTrue(svg.contains(">FATHER</text>") && svg.contains("transform=\"rotate("), "written along the channel");
+        assertTrue(svg.contains("font:400 14.5px Baskerville"), "a plain roman for the names");
+        assertTrue(svg.contains(">THE ROSSI FAMILY</text>"), "the name kept whole, the disc on the rule below");
         assertFalse(svg.contains("stroke-dasharray:2 2"), "channels instead of plain ties");
         var html = page.html(true);
         assertTrue(html.contains("class=\"ornate sephirot\"") && html.contains("☉") && !html.contains("class=\"cn tl\""));
@@ -446,6 +456,52 @@ class ChartTest {
             assertEquals(dark ? 0x0b0a09 : 0xefe6d2, img.getRGB(3, 3) & 0xffffff, "black plate / cream print");
         }
         assertTrue(Theme.SEPHIROT.startsDark() && !Theme.SEPHIROT.hasTimeline() && !Theme.SEPHIROT.baroque() && Theme.SEPHIROT.ornate());
+    }
+
+    @Test
+    void longGivenNamesShortenToInitials() {
+        var f = Theme.SEPHIROT.font("nm");
+        assertEquals("Elizabeth A. M.", ChartPage.initials("Elizabeth Alexandra Mary", 98 / 0.86, f));
+        assertEquals("Rosalía R.", ChartPage.initials("Rosalía de los Remedios", 90, f), "particles dropped");
+        assertEquals("E. A. M.", ChartPage.initials("Elizabeth Alexandra Mary", 40, f));
+        assertEquals("Ana", ChartPage.initials("Ana", 10, f), "a single name is left alone");
+    }
+
+    @Test
+    void sephirotChannelsCrossLikeStreets() {
+        // A full pedigree: rays from the root to the ancestors, except where one would pass behind a medallion.
+        var sb = new StringBuilder("0 HEAD\n");
+        for (int i = 1; i <= 15; i++) {
+            sb.append("0 @I").append(i).append("@ INDI\n1 NAME P").append(i).append(" /X/\n1 SEX ").append(i % 2 == 0 || i == 1 ? "M" : "F").append('\n');
+            if (i <= 7) sb.append("1 FAMC @F").append(i).append("@\n");
+            if (i > 1) sb.append("1 FAMS @F").append(i / 2).append("@\n");
+        }
+        for (int i = 1; i <= 7; i++) sb.append("0 @F").append(i).append("@ FAM\n1 HUSB @I").append(2 * i).append("@\n1 WIFE @I").append(2 * i + 1).append("@\n1 CHIL @I").append(i).append("@\n");
+        var full = Genealogy.of(sb.append("0 TRLR\n").toString());
+        var c = Sephirot.build(full, full.person("I1").orElseThrow(), new Layout.Spec(2, 0, true, Labels.EN, Theme.SEPHIROT));
+        assertEquals(6 + 2, c.links().size(), "two per child, plus rays to the inner grandparents (the outer would cross the parents)");
+        var root = card(c, "I1");
+        double rx = root.x() + Sephirot.R, ry = root.y() + Sephirot.R;
+        for (var key : List.of("I5", "I6")) {
+            var gp = card(c, key);
+            assertTrue(c.links().stream().anyMatch(k -> Math.abs(Math.hypot(k.x2() - (gp.x() + Sephirot.R), k.y2() - (gp.y() + Sephirot.R)) - Sephirot.R - 2) < 1e-6
+                    && Math.abs(Math.hypot(k.x1() - rx, k.y1() - ry) - Sephirot.R - 2) < 1e-6), key + " joined to the root");
+        }
+        // Each lineage channel crosses the parents' channel: there the rules open, so the parents'
+        // channel's rules are drawn in pieces.
+        var tie = c.ties().stream().filter(t -> Math.abs(t.y1() - ry + Sephirot.ROW) < 1).findFirst().orElseThrow();
+        var quads = new java.util.ArrayList<double[][]>();
+        for (var k : c.links()) quads.add(ChartPage.quad(k, ChartPage.CHANNEL));
+        var q = ChartPage.quad(tie, ChartPage.CHANNEL);
+        quads.add(q);
+        assertEquals(3, ChartPage.open(q[0], q[1], quads, quads.size() - 1).size(), "the top rule, broken by two crossings");
+        // A generation further up, the great-grandparents get rays from the root as well,
+        // and nothing joins the middle layers to each other.
+        var deeper = Sephirot.build(full, full.person("I1").orElseThrow(), new Layout.Spec(3, 0, true, Labels.EN, Theme.SEPHIROT));
+        assertEquals(14 + 2 + 6, deeper.links().size(), "two great-grandparents sit straight behind a grandparent");
+        var sun = card(deeper, "I1");
+        long rays = deeper.links().stream().filter(k -> Math.abs(Math.hypot(k.x1() - sun.x() - Sephirot.R, k.y1() - sun.y() - Sephirot.R) - Sephirot.R - 2) < 1e-6).count();
+        assertEquals(2 + 2 + 6, rays, "the root's own two parents, then the rays");
     }
 
     @Test
@@ -462,7 +518,6 @@ class ChartTest {
         assertEquals("Bisabuelo", Labels.ES.relation(3, true, M));
         assertEquals("Nieto/a", Labels.ES.relation(2, false, U));
         assertEquals("Ancestro · gen. 6", Labels.ES.relation(6, true, M));
-        assertEquals("Esposa", Labels.ES.spouse(F));
     }
 
     private static ChartPage modernOn(Genealogy g, LocalDate today) {

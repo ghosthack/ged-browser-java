@@ -98,14 +98,6 @@ public enum Labels {
         return cap(word);
     }
 
-    public String spouse(Person.Sex sex) {
-        return switch (sex) {
-            case MALE -> pick("Husband", "Esposo");
-            case FEMALE -> pick("Wife", "Esposa");
-            default -> pick("Spouse", "Cónyuge");
-        };
-    }
-
     private static String cap(String s) { return s.isEmpty() ? s : Character.toUpperCase(s.charAt(0)) + s.substring(1); }
 
     private static String ordinal(int n) {

@@ -62,13 +62,18 @@ public final class ChartPage {
     public String subtitle() {
         int gens = chart.up() + chart.down() + 1;
         int n = chart.peopleCount();
-        return (chart.timeline() ? l.timelineWith(n) : l.treeWith(n)) + " · " + l.generations(gens) + " · " + l.made(today);
+        var s = (chart.timeline() ? l.timelineWith(n) : l.treeWith(n)) + " · " + l.generations(gens) + " · " + l.made(today);
+        return theme.sephirot() ? dots(s) : s;
     }
 
     // ---- marks ---------------------------------------------------------------
 
     /// Something drawn on a card, in card coordinates. Colours are palette keys.
-    sealed interface Mark permits Box, Bar, Dot, Txt, FlagMark, Orn, Ring {}
+    sealed interface Mark permits Box, Bar, Dot, Txt, FlagMark, Orn, Ring, Slant {}
+
+    /// One line of text centred on (x, y) — the middle of its capitals, not its
+    /// baseline — and turned by `angle` (radians, clockwise on screen).
+    record Slant(String text, String style, double x, double y, double angle) implements Mark {}
 
     /// Rounded rectangle; `cls` tags the card background for hover/selection.
     record Box(double x, double y, double w, double h, double r, String fill, String stroke, double strokeW,
@@ -350,10 +355,10 @@ public final class ChartPage {
     }
 
     /// A medallion on an engraved plate: a double ring carrying the birth
-    /// (top) and death (bottom) in small capitals, the name, years and age
-    /// inside, the flag above them, the relation to the root as a caption
-    /// over it and the old sign for man or woman beside it. The root is
-    /// crowned with rays.
+    /// (top) and death (bottom) in small capitals; inside, the old sign for
+    /// man or woman over the name, years and age; the birth country's flag,
+    /// round, beside it. The root is crowned with rays. (How each person is
+    /// related is written along the channels; see [#channels].)
     private List<Mark> sephirotMarks(Card c) {
         double R = Sephirot.R, cx = R, cy = R, band = R - 15, inner = band - 3.5;
         var p = c.person();
@@ -381,24 +386,20 @@ public final class ChartPage {
                 : ringLine("* ", p.event("BIRT").or(() -> p.event("CHR")).or(() -> p.event("BAPM")), room, rf);
         var bottom = repeat ? "" : ringLine("† ", p.event("DEAT").or(() -> p.event("BURI")), room, rf);
         if (bottom.isEmpty() && p.isDeceased() && !repeat) bottom = "†";
-        if (!top.isEmpty()) out.add(new Ring(fit(top, room, rf), "ring", cx, cy, band + 3.3, true));
-        if (!bottom.isEmpty()) out.add(new Ring(fit(bottom, room, rf), "ring", cx, cy, R - 4.6, false));
+        if (!top.isEmpty()) out.add(new Ring(dots(fit(top, room, rf)), "ring", cx, cy, band + 3.3, true));
+        if (!bottom.isEmpty()) out.add(new Ring(dots(fit(bottom, room, rf)), "ring", cx, cy, R - 4.6, false));
 
-        // Caption over the medallion, and the sign for man or woman beside it.
-        var caption = relation(c);
-        if (!caption.isEmpty()) {
-            var text = caption.toUpperCase(Locale.ROOT);
-            var cf = theme.font("cap");
-            double tw = Math.min(150, measure(text, cf)) + 14;
-            out.add(new Box(cx - tw / 2, -21, tw, 16, 0, "paper", null, 0, false, null));   // channels pass behind it
-            out.add(new Txt(List.of(new Run(text, "cap", null)), cx, -10, "middle", squeeze(text, 150, theme.font("cap"))));
-        }
-        double sa = -0.7, sr = R + (root ? 22 : 13);
-        Ornaments.sexSign(out, cx + sr * Math.cos(sa), cy + sr * Math.sin(sa), p.sex(), sexKey(p));
-
-        // Inside: flag, name, years, age, record id.
+        // The birth country's flag, round, just outside the ring (below on the root, whose rays fill its upper side).
         var flag = repeat ? Optional.<Flags.Flag>empty() : Flags.forPlace(birthPlace(p));
-        flag.ifPresent(f -> out.add(new FlagMark(f, cx - 8, cy - 44, 16, 10.7)));
+        double sa = root ? 0.62 : -0.7, sr = R + (root ? 22 : 13), fx = cx + sr * Math.cos(sa), fy = cy + sr * Math.sin(sa);
+        flag.ifPresent(f -> {
+            double fh = 15, fw = fh * 1.5;
+            out.add(new Orn(Ornaments.circle(fx, fy, fh / 2 + 1.6), "paper", "orn", 0.8));
+            out.add(new FlagMark(f, fx - fw / 2, fy - fh / 2, fw, fh, Ornaments.Escutcheon.ROUND));
+        });
+
+        // Inside: the sign for man or woman, name, years, age, record id.
+        Ornaments.sexSign(out, cx, cy - 37, p.sex(), sexKey(p));
         var nm = theme.font("nm");
         var names = nameLines(p, 98, nm);
         double y = names.size() > 1 ? cy - 8 : cy + 1;
@@ -433,19 +434,6 @@ public final class ChartPage {
         return last;
     }
 
-    private double rootY = Double.NaN;
-
-    /// `Grandmother`, `Son`, `Wife`: how the person on card `c` is related to the root.
-    private String relation(Card c) {
-        if (c.kind() == Kind.ROOT) return "";
-        if (c.kind() == Kind.SPOUSE) return l.spouse(c.person().sex());
-        if (Double.isNaN(rootY)) {
-            rootY = chart.cards().stream().filter(k -> k.kind() == Kind.ROOT).mapToDouble(Card::y).findFirst().orElse(0);
-        }
-        int gen = (int) Math.round((rootY - c.y()) / Sephirot.ROW);
-        return gen == 0 ? "" : l.relation(Math.abs(gen), gen > 0, c.person().sex());
-    }
-
     private String initials(Person p) {
         var nm = p.name();
         var a = firstLetter(nm.given());
@@ -478,7 +466,31 @@ public final class ChartPage {
             first = String.join(" ", List.of(words).subList(0, half));
             second = String.join(" ", List.of(words).subList(half, words.length));
         }
-        return List.of(fit(first, width / 0.86, f), fit(second, width / 0.86, f));
+        return List.of(fit(initials(first, width / 0.86, f), width / 0.86, f), fit(second, width / 0.86, f));
+    }
+
+    /// Given names that don't fit keep the first in full and shorten the
+    /// rest to initials, as is usual for middle names: `Elizabeth A. M.`,
+    /// `Rosalía R.` for `Rosalía de los Remedios`; failing that, initials
+    /// throughout: `E. A. M.`
+    static String initials(String given, double width, Theme.Font f) {
+        if (measure(given, f) <= width) return given;
+        var words = given.strip().split("\\s+");
+        if (words.length < 2) return given;
+        var rest = new StringBuilder();
+        for (int i = 1; i < words.length; i++) {
+            var w = words[i];
+            if (!w.isEmpty() && Character.isLowerCase(w.charAt(0))) continue;   // `de los` in `Rosalía de los Remedios`
+            rest.append(' ').append(initial(w));
+        }
+        var middle = words[0] + rest;
+        if (measure(middle, f) <= width) return middle;
+        return initial(words[0]) + rest;
+    }
+
+    private static String initial(String word) {
+        var letter = firstLetter(word);
+        return letter.isEmpty() ? word : letter.toUpperCase(Locale.ROOT) + ".";
     }
 
     /// Text that a little horizontal squeeze can make fit gets squeezed; 0 = none needed.
@@ -635,22 +647,11 @@ public final class ChartPage {
         else if (theme.ornate()) out.addAll(Ornaments.border(w, pageH(heading), "orn"));
         if (!heading) return out;
         if (theme.sephirot()) {
-            // The title split either side of a half-dark disc, as on the old plates.
+            // The name whole, in spaced capitals, over a rule with the plate's half-dark disc.
             double cx = w / 2, top = pad(), ty = top + 50;
-            var tf = theme.font("title");
-            var words = title.toUpperCase(Locale.ROOT).split("\\s+");
-            if (words.length > 1) {
-                int half = (words.length + 1) / 2;
-                var left = String.join(" ", List.of(words).subList(0, half));
-                var right = String.join(" ", List.of(words).subList(half, words.length));
-                double room = w / 2 - 70;
-                Ornaments.horizon(out, cx, ty - 8.5, 15, 0, "orn", "orn");
-                out.add(new Txt(List.of(new Run(left, "title", null)), cx - 26, ty, "end", squeeze(left, room, tf)));
-                out.add(new Txt(List.of(new Run(right, "title", null)), cx + 26, ty, "start", squeeze(right, room, tf)));
-            } else {
-                out.add(new Txt(List.of(new Run(words[0], "title", null)), cx, ty, "middle", squeeze(words[0], w - 120, tf)));
-            }
-            Ornaments.horizon(out, cx, top + 70, 3, 90, "orn", "orn");
+            var name = title.toUpperCase(Locale.ROOT);
+            out.add(new Txt(List.of(new Run(name, "title", null)), cx, ty, "middle", squeeze(name, w - 120, theme.font("title"))));
+            Ornaments.horizon(out, cx, top + 70, 5, 90, "orn", "orn");
             out.add(new Txt(List.of(new Run(subtitle(), "sub", null)), cx, top + 94, "middle", 0));
         } else if (theme.ornate()) {
             double cx = w / 2, top = pad();
@@ -692,32 +693,54 @@ public final class ChartPage {
     /// Whether links and ties are plain lines (else [#linkMarks] draws them).
     boolean plainLinks() { return !theme.sephirot(); }
 
-    /// Sephirot: every link and tie as a double-ruled channel; a marriage's
-    /// channel carries its year (and place, when there's room) inside it.
+    /// Half the width of a sephirot channel: every channel is the same width, as on the plate.
+    static final double CHANNEL = 5.5;
+
+    /// Sephirot: every link and tie as a double-ruled channel, all the same
+    /// width. Where channels cross they open into each other like streets
+    /// at a crossroads: each one's rules stop at the other's edge. A
+    /// marriage's channel carries its year (and place, when there's room).
     private List<Mark> channels() {
         var out = new ArrayList<Mark>();
-        for (var k : chart.links()) channel(out, k, 3.2);
+        var bands = new ArrayList<Link>(chart.links());
+        bands.addAll(chart.ties());
+        var quads = bands.stream().map(k -> quad(k, CHANNEL)).toList();
+        for (var q : quads) {
+            if (q != null) out.add(new Orn("M" + pt(q[0]) + " L" + pt(q[1]) + " L" + pt(q[2]) + " L" + pt(q[3]) + " Z", "paper", null, 0));
+        }
+        for (int i = 0; i < quads.size(); i++) {
+            var q = quads.get(i);
+            if (q == null) continue;
+            var d = new StringBuilder();
+            for (var side : List.of(new double[][] {q[0], q[1]}, new double[][] {q[3], q[2]})) {
+                for (var seg : open(side[0], side[1], quads, i)) d.append(d.isEmpty() ? "M" : " M").append(pt(seg[0])).append(" L").append(pt(seg[1]));
+            }
+            if (!d.isEmpty()) out.add(new Orn(d.toString(), null, "link", 0.9));
+        }
+
+        labelChannels(out, quads);
+
         // A small knot wherever channels meet away from a medallion.
         var ends = new java.util.HashMap<String, double[]>();
         var counts = new java.util.HashMap<String, Integer>();
         for (var k : chart.links()) {
-            for (var pt : List.of(new double[] {k.x1(), k.y1()}, new double[] {k.x2(), k.y2()})) {
-                var key = Math.round(pt[0]) + ":" + Math.round(pt[1]);
-                ends.put(key, pt);
+            for (var p : List.of(new double[] {k.x1(), k.y1()}, new double[] {k.x2(), k.y2()})) {
+                var key = Math.round(p[0]) + ":" + Math.round(p[1]);
+                ends.put(key, p);
                 counts.merge(key, 1, Integer::sum);
             }
         }
         counts.forEach((key, n) -> {
             if (n < 2) return;
-            var pt = ends.get(key);
-            out.add(new Orn(Ornaments.circle(pt[0], pt[1], 4.6), "paper", "link", 0.9));
-            out.add(new Dot(pt[0], pt[1], 1.5, "link"));
+            var p = ends.get(key);
+            out.add(new Orn(Ornaments.circle(p[0], p[1], CHANNEL + 2.5), "paper", "link", 0.9));
+            out.add(new Dot(p[0], p[1], 1.6, "link"));
         });
+
         var byCentre = new java.util.HashMap<String, Card>();
         for (var c : chart.cards()) byCentre.put(Math.round(c.x() + Sephirot.R) + ":" + Math.round(c.y() + Sephirot.R), c);
         var tf = theme.font("tag");
         for (var t : chart.ties()) {
-            channel(out, t, 7);
             var a = byCentre.get(Math.round(t.x1() - Sephirot.R - 2) + ":" + Math.round(t.y1()));
             var b = byCentre.get(Math.round(t.x2() + Sephirot.R + 2) + ":" + Math.round(t.y2()));
             if (a == null || b == null) continue;
@@ -733,20 +756,114 @@ public final class ChartPage {
                 if (measure(cand, tf) <= room) { text = cand; break; }
             }
             if (text == null) continue;
-            out.add(new Txt(List.of(new Run(text, "tag", null)), (t.x1() + t.x2()) / 2, t.y1() + 2.9, "middle", 0));
+            out.add(new Txt(List.of(new Run(dots(text), "tag", null)), (t.x1() + t.x2()) / 2, t.y1() + 2.9, "middle", 0));
         }
         return out;
     }
 
-    /// A band `half` either side of the line k: paper inside, a fine rule along each side.
-    private static void channel(List<Mark> out, Link k, double half) {
+    /// Writes along each channel between two medallions what its upper end is to its lower
+    /// end (`FATHER`, `GREAT-GRANDMOTHER`), in the longest stretch clear of crossings and of
+    /// the flags at either end; left out where there's no room.
+    private void labelChannels(List<Mark> out, List<double[][]> quads) {
+        double R = Sephirot.R, rim = R + 2;
+        var sf = theme.font("chan");
+        var links = chart.links();
+        for (int i = 0; i < links.size(); i++) {
+            var k = links.get(i);
+            Card a = null, b = null;
+            for (var c : chart.cards()) {
+                double cx = c.x() + R, cy = c.y() + R;
+                if (Math.abs(Math.hypot(k.x1() - cx, k.y1() - cy) - rim) < 0.5) a = c;
+                if (Math.abs(Math.hypot(k.x2() - cx, k.y2() - cy) - rim) < 0.5) b = c;
+            }
+            if (a == null || b == null || a == b) continue;
+            var upper = a.y() < b.y() ? a : b;
+            var lower = upper == a ? b : a;
+            int gens = (int) Math.round((lower.y() - upper.y()) / Sephirot.ROW);
+            if (gens < 1) continue;
+            var text = l.relation(gens, true, upper.person().sex()).toUpperCase(Locale.ROOT);
+            double need = measure(text, sf) + 14;
+            // The centre line, kept clear of the flags at either end.
+            double len = Math.hypot(k.x2() - k.x1(), k.y2() - k.y1()), trim = 26 / len;
+            if (len < need + 52) continue;
+            double[] p0 = lerp(new double[] {k.x1(), k.y1()}, new double[] {k.x2(), k.y2()}, trim);
+            double[] p1 = lerp(new double[] {k.x1(), k.y1()}, new double[] {k.x2(), k.y2()}, 1 - trim);
+            double[][] best = null;
+            double bestLen = 0;
+            for (var seg : open(p0, p1, quads, i)) {
+                double sl = Math.hypot(seg[1][0] - seg[0][0], seg[1][1] - seg[0][1]);
+                if (sl > bestLen) { bestLen = sl; best = seg; }
+            }
+            if (best == null || bestLen < need) continue;
+            double angle = Math.atan2(k.y2() - k.y1(), k.x2() - k.x1());
+            if (angle > Math.PI / 2) angle -= Math.PI;       // keep the letters upright
+            else if (angle <= -Math.PI / 2) angle += Math.PI;
+            out.add(new Slant(text, "chan", (best[0][0] + best[1][0]) / 2, (best[0][1] + best[1][1]) / 2, angle));
+        }
+    }
+
+    /// The plate's separator: Baskerville's own middle dot sits off-centre, the dot operator doesn't.
+    private static String dots(String s) { return s.replace('·', '∙'); }
+
+    private static String pt(double[] p) { return n(p[0]) + " " + n(p[1]); }
+
+    /// The band `half` either side of line k, as its four corners in order; null for a line too short to draw.
+    static double[][] quad(Link k, double half) {
         double len = Math.hypot(k.x2() - k.x1(), k.y2() - k.y1());
-        if (len < 1) return;
+        if (len < 1) return null;
         double nx = -(k.y2() - k.y1()) / len * half, ny = (k.x2() - k.x1()) / len * half;
-        String a1 = n(k.x1() + nx) + " " + n(k.y1() + ny), a2 = n(k.x2() + nx) + " " + n(k.y2() + ny);
-        String b1 = n(k.x1() - nx) + " " + n(k.y1() - ny), b2 = n(k.x2() - nx) + " " + n(k.y2() - ny);
-        out.add(new Orn("M" + a1 + " L" + a2 + " L" + b2 + " L" + b1 + " Z", "paper", null, 0));
-        out.add(new Orn("M" + a1 + " L" + a2 + " M" + b1 + " L" + b2, null, "link", 0.9));
+        return new double[][] {{k.x1() + nx, k.y1() + ny}, {k.x2() + nx, k.y2() + ny},
+                {k.x2() - nx, k.y2() - ny}, {k.x1() - nx, k.y1() - ny}};
+    }
+
+    /// The parts of segment a–b lying outside every band but `self`.
+    static List<double[][]> open(double[] a, double[] b, List<double[][]> quads, int self) {
+        var cuts = new ArrayList<double[]>();
+        for (int j = 0; j < quads.size(); j++) {
+            if (j == self || quads.get(j) == null) continue;
+            var t = inside(a, b, quads.get(j));
+            if (t != null) cuts.add(t);
+        }
+        cuts.sort(java.util.Comparator.comparingDouble(c -> c[0]));
+        var out = new ArrayList<double[][]>();
+        double from = 0;
+        for (var c : cuts) {
+            if (c[0] > from) out.add(new double[][] {lerp(a, b, from), lerp(a, b, c[0])});
+            from = Math.max(from, c[1]);
+        }
+        if (from < 1) out.add(new double[][] {lerp(a, b, from), b});
+        out.removeIf(s -> Math.hypot(s[1][0] - s[0][0], s[1][1] - s[0][1]) < 0.5);
+        return out;
+    }
+
+    private static double[] lerp(double[] a, double[] b, double t) {
+        return new double[] {a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t};
+    }
+
+    /// Where along a–b (0–1) the segment runs strictly inside convex quad q, or null (Cyrus–Beck clipping).
+    private static double[] inside(double[] a, double[] b, double[][] q) {
+        double lo = 0, hi = 1, dx = b[0] - a[0], dy = b[1] - a[1];
+        // Which way round the corners go decides which side of each edge is inside.
+        double area = 0;
+        for (int i = 0; i < 4; i++) area += q[i][0] * q[(i + 1) % 4][1] - q[(i + 1) % 4][0] * q[i][1];
+        double turn = Math.signum(area);
+        for (int i = 0; i < 4; i++) {
+            var p = q[i];
+            var r = q[(i + 1) % 4];
+            double ex = r[0] - p[0], ey = r[1] - p[1];
+            double nx = -ey * turn, ny = ex * turn;   // inward normal
+            double num = nx * (a[0] - p[0]) + ny * (a[1] - p[1]) - 0.05 * Math.hypot(nx, ny);
+            double den = nx * dx + ny * dy;
+            if (Math.abs(den) < 1e-12) {
+                if (num < 0) return null;
+                continue;
+            }
+            double t = -num / den;
+            if (den > 0) lo = Math.max(lo, t);
+            else hi = Math.min(hi, t);
+            if (lo >= hi) return null;
+        }
+        return new double[] {lo, hi};
     }
 
     // ---- SVG -----------------------------------------------------------------
@@ -822,6 +939,12 @@ public final class ChartPage {
 
     private int ringIds;
 
+    /// Browsers already set Baskerville's asterisk mid-line; Java2D draws it higher.
+    private static final double svgStarDrop = 0;
+
+    /// How far to lower a birth asterisk so it sits mid-line rather than at cap height.
+    static double starDrop(Theme.Font f) { return Math.round(f.size() * 0.15 * 10) / 10.0; }
+
     private void paint(StringBuilder sb, Mark m, Colors mode) {
         switch (m) {
             case Box b -> {
@@ -856,6 +979,14 @@ public final class ChartPage {
             }
             sb.append("\"/>");
         }
+            case Slant t -> {
+                var f = theme.font(t.style());
+                double deg = Math.toDegrees(t.angle());
+                sb.append("<text x=\"").append(n(t.x())).append("\" y=\"").append(n(t.y() + f.size() * 0.34))
+                        .append("\" text-anchor=\"middle\" transform=\"rotate(").append(n(deg)).append(' ').append(n(t.x())).append(' ')
+                        .append(n(t.y())).append(")\" style=\"").append(fontStyle(t.style(), null, mode)).append("\">")
+                        .append(esc(t.text())).append("</text>");
+            }
             case Ring r -> {
                 if (r.text().isEmpty()) break;
                 var id = "ring" + (++ringIds);
@@ -865,8 +996,16 @@ public final class ChartPage {
                         .append("A").append(n(rr)).append(' ').append(n(rr)).append(" 0 0 ").append(r.top() ? 1 : 0).append(' ')
                         .append(n(cx + rr)).append(' ').append(n(cy)).append("\" style=\"fill:none\"/>");
                 sb.append("<text style=\"").append(fontStyle(r.style(), null, mode))
-                        .append("\"><textPath href=\"#").append(id).append("\" startOffset=\"50%\" text-anchor=\"middle\">")
-                        .append(esc(r.text())).append("</textPath></text>");
+                        .append("\"><textPath href=\"#").append(id).append("\" startOffset=\"50%\" text-anchor=\"middle\">");
+                if (r.text().startsWith("*") && svgStarDrop > 0) {
+                    // An asterisk sits up at cap height; bring the birth sign down to the middle of the line.
+                    var drop = n(svgStarDrop);
+                    sb.append("<tspan dy=\"").append(drop).append("\">*</tspan><tspan dy=\"-").append(drop).append("\">")
+                            .append(esc(r.text().substring(1))).append("</tspan>");
+                } else {
+                    sb.append(esc(r.text()));
+                }
+                sb.append("</textPath></text>");
             }
             case Txt t -> {
                 sb.append("<text x=\"").append(n(t.x())).append("\" y=\"").append(n(t.y())).append('"');
@@ -955,7 +1094,8 @@ public final class ChartPage {
                 .replace("{{scheme}}", theme.hasDark() ? "light dark" : "light")
                 .replace("{{vars}}", cssVars())
                 .replace("{{themeCss}}", theme.ornate()
-                        ? (ORNATE_CSS + (theme.sephirot() ? SEPHIROT_CSS : "")).replace("{{old}}", Theme.OLD_CSS).replace("{{script}}", Theme.SCRIPT_CSS)
+                        ? (ORNATE_CSS + (theme.sephirot() ? SEPHIROT_CSS : ""))
+                                .replace("{{old}}", theme.sephirot() ? Theme.PLAIN_CSS : Theme.OLD_CSS).replace("{{script}}", Theme.SCRIPT_CSS)
                         : "")
                 .replace("{{titleOrnament}}", theme.ornate() ? titleOrnament() : "")
                 .replace("{{deco}}", theme.baroque() ? cornerDeco() : "")

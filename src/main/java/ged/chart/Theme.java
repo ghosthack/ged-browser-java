@@ -192,24 +192,32 @@ public record Theme(String name, double cardW, double cardH, double stack, doubl
 
     // ---- sephirot ----------------------------------------------------------
 
+    /// A plain engraver's roman with level figures, upright throughout.
+    static final String PLAIN_CSS = "Baskerville,'Baskerville Old Face','Libre Baskerville','Times New Roman',Times,serif";
+    static final List<String> PLAIN = List.of("Baskerville", "Baskerville Old Face", "Libre Baskerville", "Times New Roman", "Times", "Serif");
+
     private static Font caps(int w, double size, double tracking, String color) {
-        return new Font(OLD_CSS, OLD, w, size, tracking, true, color);
+        return new Font(PLAIN_CSS, PLAIN, w, size, tracking, true, color);
+    }
+
+    private static Font plain(int w, double size, String color, boolean italic) {
+        return new Font(PLAIN_CSS, PLAIN, w, size, 0, false, color, italic);
     }
 
     /// Card geometry is unused by [Sephirot] (medallions have their own), but kept sane.
     public static final Theme SEPHIROT = new Theme("sephirot", 144, 144, 0, 44, 0, 0, 0,
             Map.ofEntries(
-                    Map.entry("title", caps(600, 25, 0.2, "ink")),
-                    Map.entry("sub", old(400, 12.5, "pl", true)),
-                    Map.entry("col", caps(600, 9, 0.2, "col")),
-                    Map.entry("cap", caps(600, 9, 0.2, "col")),
-                    Map.entry("ring", caps(500, 8, 0.14, "ring")),
-                    Map.entry("nm", old(600, 13.5, "ink", false)),
-                    Map.entry("yr", old(400, 12, "yr", true)),
-                    Map.entry("age", old(400, 10.5, "age", true)),
-                    Map.entry("pl", old(400, 10.5, "pl", true)),
-                    Map.entry("tag", caps(600, 8, 0.12, "tag")),
-                    Map.entry("id", caps(600, 7.5, 0.12, "idText"))),
+                    Map.entry("title", caps(400, 25, 0.2, "ink")),
+                    Map.entry("sub", plain(400, 12.5, "pl", true)),
+                    Map.entry("col", caps(400, 9, 0.2, "col")),
+                    Map.entry("ring", caps(400, 8, 0.14, "ring")),
+                    Map.entry("nm", plain(400, 14.5, "ink", false)),
+                    Map.entry("yr", plain(400, 11.5, "yr", false)),
+                    Map.entry("age", plain(400, 10, "age", false)),
+                    Map.entry("pl", plain(400, 10.5, "pl", false)),
+                    Map.entry("tag", caps(400, 8, 0.12, "tag")),
+                    Map.entry("chan", caps(400, 7, 0.18, "age")),
+                    Map.entry("id", caps(400, 7.5, 0.12, "idText"))),
             Map.ofEntries(
                     Map.entry("paper", "#efe6d2"), Map.entry("ink", "#1c1712"), Map.entry("muted", "#6e6252"),
                     Map.entry("line", "#d6cab0"), Map.entry("panel", "#f6efdf"), Map.entry("btn", "#f6efdf"),

@@ -6,6 +6,7 @@ import ged.chart.ChartPage.Dot;
 import ged.chart.ChartPage.FlagMark;
 import ged.chart.ChartPage.Orn;
 import ged.chart.ChartPage.Ring;
+import ged.chart.ChartPage.Slant;
 import ged.chart.ChartPage.Txt;
 import ged.chart.Layout.Kind;
 import ged.chart.Layout.Link;
@@ -211,6 +212,17 @@ public final class PngChart {
             }
             case Txt t -> text(g, t);
             case Ring r -> ring(g, r);
+            case Slant t -> {
+                var f = font(t.style());
+                var saved = g.getTransform();
+                g.translate(t.x(), t.y());
+                g.rotate(t.angle());
+                g.setFont(f);
+                g.setColor(color(theme.font(t.style()).color()));
+                float w = (float) f.getStringBounds(t.text(), g.getFontRenderContext()).getWidth();
+                g.drawString(t.text(), -w / 2, (float) (theme.font(t.style()).size() * 0.34));
+                g.setTransform(saved);
+            }
         }
     }
 
@@ -239,7 +251,8 @@ public final class PngChart {
             g.setTransform(saved);
             g.translate(r.cx() + radius * Math.cos(mid), r.cy() + radius * Math.sin(mid));
             g.rotate(mid + dir * Math.PI / 2);
-            g.drawString(chars[k], (float) (-adv[k] / 2), 0f);
+            float drop = k == 0 && chars[k].equals("*") ? (float) ChartPage.starDrop(theme.font(r.style())) : 0f;
+            g.drawString(chars[k], (float) (-adv[k] / 2), drop);
             theta += dir * adv[k] / radius;
         }
         g.setTransform(saved);

@@ -64,7 +64,9 @@ final class Ornaments {
     enum Escutcheon {
         SHIELD("M0 0 L1 0 L1 0.52 C1 0.78 0.76 0.92 0.5 1 C0.24 0.92 0 0.78 0 0.52 Z", 21, 25, -11),
         LOZENGE("M0.5 0 L1 0.5 L0.5 1 L0 0.5 Z", 28, 28, -13),
-        OVAL("M0.5 0 C0.78 0 1 0.22 1 0.5 C1 0.78 0.78 1 0.5 1 C0.22 1 0 0.78 0 0.5 C0 0.22 0.22 0 0.5 0 Z", 24, 18, -8);
+        OVAL("M0.5 0 C0.78 0 1 0.22 1 0.5 C1 0.78 0.78 1 0.5 1 C0.22 1 0 0.78 0 0.5 C0 0.22 0.22 0 0.5 0 Z", 24, 18, -8),
+        /// A circle as tall as a 3:2 flag, centred on it: a round flag for the sephirot plate.
+        ROUND("M0.8333 0.5 C0.8333 0.7762 0.6841 1 0.5 1 C0.3159 1 0.1667 0.7762 0.1667 0.5 C0.1667 0.2238 0.3159 0 0.5 0 C0.6841 0 0.8333 0.2238 0.8333 0.5 Z", 21, 14, 0);
 
         private final String unit;
         private final double w, h, top;
