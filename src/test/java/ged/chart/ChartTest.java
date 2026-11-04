@@ -414,6 +414,18 @@ class ChartTest {
         assertEquals(root.y() + 3 * Sephirot.ROW, card(c, "I9").y(), 1e-9);
         assertEquals(List.of("I8"), keys(c, Kind.REPEAT), "the cousin bride once in full, then repeated");
         assertEquals(3, c.down());
+        // Their channels name the children: Marco a son, Anna a daughter.
+        var page = new ChartPage(g, c, Labels.EN, "t", false, LocalDate.of(2026, 11, 3));
+        var along = page.linkMarks().stream().filter(m -> m instanceof ChartPage.Slant).map(m -> ((ChartPage.Slant) m).text()).toList();
+        assertTrue(along.contains("SON") && along.contains("DAUGHTER"), along.toString());
+        assertFalse(along.contains("FATHER") || along.contains("MOTHER"), "below the root, channels name the child");
+        // A single child hangs straight below the couple, and its channel is labelled too.
+        var one = Sephirot.build(g, g.person("I7").orElseThrow(), new Layout.Spec(0, 1, true, Labels.EN, Theme.SEPHIROT));
+        var elena = card(one, "I9");
+        assertEquals((card(one, "I7").x() + card(one, "I8").x()) / 2, elena.x(), 1e-9);
+        var oneMarks = new ChartPage(g, one, Labels.EN, "t", false, LocalDate.of(2026, 11, 3)).linkMarks();
+        assertTrue(oneMarks.stream().anyMatch(m -> m instanceof ChartPage.Slant t && t.text().equals("DAUGHTER")
+                && Math.abs(Math.abs(t.angle()) - Math.PI / 2) < 1e-9), "written down the vertical channel");
     }
 
     @Test

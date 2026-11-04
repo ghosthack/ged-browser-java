@@ -277,19 +277,23 @@ public final class Sephirot {
             }
             for (var gr : groups) {
                 double mid = gr.partner == null ? self : (self + at.get(gr.partner)) / 2;
-                boolean stem = false;
+                var centres = new ArrayList<Double>();
                 for (var k : gr.kids) {
-                    double kc = placeDesc(k, kx, depth + 1);
-                    if (Math.abs(kc - mid) < 1) {
-                        links.add(new double[] {mid, -depth, kc, -(depth + 1), gr.partner == null ? 1 : 0, 1});
-                    } else {
-                        stem = true;
-                        links.add(new double[] {mid, foot, kc, drop, 0, 0});
-                        links.add(new double[] {kc, drop, kc, -(depth + 1), 0, 1});
-                    }
+                    centres.add(placeDesc(k, kx, depth + 1));
                     kx += width(k) + GAP;
                 }
-                if (stem) links.add(new double[] {mid, -depth, mid, foot, gr.partner == null ? 1 : 0, 0});
+                boolean fan = centres.stream().anyMatch(kc -> Math.abs(kc - mid) >= 1);
+                if (fan) links.add(new double[] {mid, -depth, mid, foot, gr.partner == null ? 1 : 0, 0});
+                for (double kc : centres) {
+                    if (Math.abs(kc - mid) >= 1) {
+                        links.add(new double[] {mid, foot, kc, drop, 0, 0});
+                        links.add(new double[] {kc, drop, kc, -(depth + 1), 0, 1});
+                    } else if (fan) {
+                        links.add(new double[] {mid, foot, kc, -(depth + 1), 0, 1});   // straight on down from the fan's knot
+                    } else {
+                        links.add(new double[] {mid, -depth, kc, -(depth + 1), gr.partner == null ? 1 : 0, 1});
+                    }
+                }
             }
             return self;
         }

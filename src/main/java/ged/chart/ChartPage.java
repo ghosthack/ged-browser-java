@@ -761,33 +761,58 @@ public final class ChartPage {
         return out;
     }
 
-    /// Writes along each channel between two medallions what its upper end is to its lower
-    /// end (`FATHER`, `GREAT-GRANDMOTHER`), in the longest stretch clear of crossings and of
-    /// the flags at either end; left out where there's no room.
+    /// Writes along each channel how the people it joins are related. Above the root it
+    /// says what the upper end is to the lower (`FATHER`, `GREAT-GRANDMOTHER`); below, what
+    /// the child is to its parents (`SON`, `DAUGHTER`), on the slanting part of the fan that
+    /// leads down to the child, or on the whole channel when the child hangs straight below.
+    /// Set in the longest stretch clear of crossings, knots and flags; left out where there's no room.
     private void labelChannels(List<Mark> out, List<double[][]> quads) {
         double R = Sephirot.R, rim = R + 2;
         var sf = theme.font("chan");
+        double rootY = chart.cards().stream().filter(c -> c.kind() == Kind.ROOT).mapToDouble(Card::y).findFirst().orElse(0);
         var links = chart.links();
         for (int i = 0; i < links.size(); i++) {
             var k = links.get(i);
-            Card a = null, b = null;
+            Card a = null, b = null, dropA = null, dropB = null;
             for (var c : chart.cards()) {
                 double cx = c.x() + R, cy = c.y() + R;
                 if (Math.abs(Math.hypot(k.x1() - cx, k.y1() - cy) - rim) < 0.5) a = c;
                 if (Math.abs(Math.hypot(k.x2() - cx, k.y2() - cy) - rim) < 0.5) b = c;
+                // Where a fan's channel turns to drop straight into this child.
+                if (Math.abs(k.x1() - cx) < 0.5 && Math.abs(k.y1() - (cy - Sephirot.DROP)) < 0.5) dropA = c;
+                if (Math.abs(k.x2() - cx) < 0.5 && Math.abs(k.y2() - (cy - Sephirot.DROP)) < 0.5) dropB = c;
             }
-            if (a == null || b == null || a == b) continue;
-            var upper = a.y() < b.y() ? a : b;
-            var lower = upper == a ? b : a;
-            int gens = (int) Math.round((lower.y() - upper.y()) / Sephirot.ROW);
-            if (gens < 1) continue;
-            var text = l.relation(gens, true, upper.person().sex()).toUpperCase(Locale.ROOT);
+            String text;
+            if (a != null && b != null && a != b) {
+                var upper = a.y() < b.y() ? a : b;
+                var lower = upper == a ? b : a;
+                int gens = (int) Math.round((lower.y() - upper.y()) / Sephirot.ROW);
+                if (gens < 1) continue;
+                text = lower.y() > rootY + 1 ? l.relation(gens, false, lower.person().sex())   // a descendant
+                        : l.relation(gens, true, upper.person().sex());
+            } else if (a == null && b == null && (dropA != null || dropB != null)) {
+                var child = dropB != null ? dropB : dropA;
+                text = l.relation(1, false, child.person().sex());
+            } else if ((a == null) != (b == null) && (a != null ? a : b).y() > rootY + 1) {
+                var child = a != null ? a : b;
+                double other = a != null ? k.y2() : k.y1();
+                if (other > child.y()) continue;                 // must come down into the child
+                if (dropA == child || dropB == child) continue;  // the short drop of a fan: labelled above it
+                text = l.relation(1, false, child.person().sex());
+            } else {
+                continue;
+            }
+            text = text.toUpperCase(Locale.ROOT);
             double need = measure(text, sf) + 14;
-            // The centre line, kept clear of the flags at either end.
-            double len = Math.hypot(k.x2() - k.x1(), k.y2() - k.y1()), trim = 26 / len;
-            if (len < need + 52) continue;
-            double[] p0 = lerp(new double[] {k.x1(), k.y1()}, new double[] {k.x2(), k.y2()}, trim);
-            double[] p1 = lerp(new double[] {k.x1(), k.y1()}, new double[] {k.x2(), k.y2()}, 1 - trim);
+            // The centre line, kept clear of the flags at a medallion end and the knots elsewhere.
+            double len = Math.hypot(k.x2() - k.x1(), k.y2() - k.y1());
+            // (A child is entered from straight above, clear of its flag, so it needs less.)
+            boolean down = (a != null ? a : b) != null && (a != null ? a : b).y() > rootY + 1;
+            double cardEnd = down ? 10 : 26;
+            double t0 = (a != null ? cardEnd : 12) / len, t1 = (b != null ? cardEnd : 12) / len;
+            if (len * (1 - t0 - t1) < need) continue;
+            double[] p0 = lerp(new double[] {k.x1(), k.y1()}, new double[] {k.x2(), k.y2()}, t0);
+            double[] p1 = lerp(new double[] {k.x1(), k.y1()}, new double[] {k.x2(), k.y2()}, 1 - t1);
             double[][] best = null;
             double bestLen = 0;
             for (var seg : open(p0, p1, quads, i)) {
