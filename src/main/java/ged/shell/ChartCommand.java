@@ -29,10 +29,11 @@ final class ChartCommand implements Command {
             .flag("S", "no-spouses", "don't draw partners of descendants")
             .value("o", "output", "FILE", "where to write: .html (default), .png or .svg for an image")
             .value(null, "scale", "N", "PNG resolution multiplier (default 2; 1 = smaller file)")
-            .value("t", "title", "TEXT", "heading (default: \"Family tree of NAME\")")
+            .value("t", "title", "TEXT", "heading (default: the person's name)")
             .value(null, "lang", "en|es", "language of labels and dates (default en)")
             .flag(null, "notes", "include notes in the click-for-details panel")
-            .value(null, "theme", "classic|modern", "look of the cards (default modern)")
+            .value(null, "theme", "modern|classic|baroque", "look of the cards (default modern)")
+            .flag(null, "arms", "baroque: bear the flag on a shield (men) or lozenge (women)")
             .flag(null, "dark", "dark colours (HTML starts dark; viewers can switch); not for classic");
 
     @Override public String name() { return "chart"; }
@@ -42,7 +43,7 @@ final class ChartCommand implements Command {
     public String usage() {
         return """
                 chart [-a|-d] [--timeline] [-n N|--all] [-S] [-o FILE] [--scale N] [-t TITLE] [--lang en|es] [--notes]
-                      [--theme classic|modern] [--dark] [PATH]
+                      [--theme modern|classic|baroque] [--arms] [--dark] [PATH]
 
                 Draws PATH (default: current person) with ancestors to the left and
                 descendants (with their partners) to the right, one column per
@@ -56,7 +57,12 @@ final class ChartCommand implements Command {
                 light/dark setting and prints light. Someone who appears twice
                 (cousin marriages) is drawn once and then as a dashed card. Notes
                 are left out unless you ask for them with --notes. --theme classic
-                is the plainer warm-paper look (light only).
+                is the plainer warm-paper look (light only). --theme baroque is a
+                19th-century engraved look on parchment: framed cards with corner
+                scrollwork and the birth flag on top, a bordered page with arabesques and a
+                flourished script title; its dark version is candlelit. Add
+                --arms to bear each flag on a shield for men or a lozenge for
+                women, as old heraldry did.
 
                   chart                          4 generations each way → NAME-tree.html
                   chart -a -n 6 -o abuelos.html  6 generations of ancestors
@@ -65,6 +71,7 @@ final class ChartCommand implements Command {
                   chart -d --all -o family.svg   every descendant, as a scalable image
                   chart --dark -o arbol.png      a dark picture
                   chart --theme classic          the original look
+                  chart --theme baroque -o arbol.png   an heirloom-style picture
 
                 --timeline draws everyone on a time axis instead: one bar per life,
                 from birth to death (or to today), so longer lives are longer bars,
@@ -108,16 +115,16 @@ final class ChartCommand implements Command {
         var spec = new Layout.Spec(o.has("descendants") ? 0 : depth, o.has("ancestors") ? 0 : depth,
                 !o.has("no-spouses"), labels, theme);
         boolean timeline = o.has("timeline");
-        if (timeline && !theme.modern()) throw new CommandException("--timeline has only the modern look; drop --theme classic");
+        if (timeline && !theme.hasTimeline()) throw new CommandException("--timeline needs the modern or baroque look; drop --theme classic");
         Layout.Chart chart;
         try {
             chart = timeline ? Timeline.build(ctx.g(), root, spec, LocalDate.now()) : Layout.build(ctx.g(), root, spec);
         } catch (IllegalArgumentException e) {
             throw new CommandException(e.getMessage());
         }
-        var who = root.name().display();
-        var title = o.get("title").orElse(timeline ? labels.timelineTitle(who) : labels.title(who));
-        var page = new ChartPage(ctx.g(), chart, labels, title, o.has("notes"), LocalDate.now());
+        var title = o.get("title").orElse(root.name().display());
+        if (o.has("arms") && !theme.ornate()) throw new CommandException("--arms goes with --theme baroque");
+        var page = new ChartPage(ctx.g(), chart, labels, title, o.has("notes"), LocalDate.now()).arms(o.has("arms"));
 
         var target = Path.of(o.get("output").orElse(slug(root) + (timeline ? "-timeline.html" : "-tree.html")));
         var file = target.getFileName().toString().toLowerCase(Locale.ROOT);

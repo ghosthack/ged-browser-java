@@ -306,6 +306,76 @@ class ChartTest {
         assertTrue(e.getMessage().contains("no birth"));
     }
 
+    // ---- baroque -----------------------------------------------------------
+
+    @Test
+    void ornamentPathsMirrorAndReplay() {
+        assertEquals("M 10 20 C 8 20 6 22 6 24", Ornaments.place("M0 0 C2 0 4 2 4 4", 10, 20, -1, 1));
+        var frame = Ornaments.frame(0, 0, 100, 50, 8);
+        assertTrue(frame.startsWith("M8 0 L92 0 Q92 8 100 8"), frame);
+        var bounds = PngChart.path(frame).getBounds2D();
+        assertEquals(100, bounds.getWidth(), 1e-9);
+        assertEquals(50, bounds.getHeight(), 1e-9);
+    }
+
+    @Test
+    void baroqueFramesCardsAndBordersThePage() throws Exception {
+        var c = Layout.build(g, g.person("I9").orElseThrow(), new Layout.Spec(2, 1, true, Labels.EN, Theme.BAROQUE));
+        var page = new ChartPage(g, c, Labels.EN, "The Rossi family", false, LocalDate.of(2026, 11, 3));
+        var marks = page.marks(card(c, "I9"));
+        assertTrue(marks.stream().anyMatch(m -> m instanceof ChartPage.Orn o && "bg".equals(o.cls())), "frame is the hover target");
+        assertTrue(marks.stream().filter(m -> m instanceof ChartPage.Orn).count() > 15, "scrollwork, crest and plate");
+        // Marco was born in Genova: his flag is a medallion on the card's top edge, not on the birthplace line.
+        var flags = page.marks(card(c, "I3")).stream().filter(m -> m instanceof ChartPage.FlagMark).map(m -> (ChartPage.FlagMark) m).toList();
+        assertEquals(1, flags.size());
+        assertTrue(flags.getFirst().y() < 0 && flags.getFirst().y() + flags.getFirst().h() > 0, "straddles the frame");
+        assertEquals(Theme.BAROQUE.cardW() / 2, flags.getFirst().x() + flags.getFirst().w() / 2, 1e-9);
+        assertEquals(null, flags.getFirst().clip(), "a plain medallion unless arms are asked for");
+        page.arms(true);
+        var arms = page.marks(card(c, "I3")).stream().filter(m -> m instanceof ChartPage.FlagMark).map(m -> (ChartPage.FlagMark) m).toList();
+        assertEquals(Ornaments.Escutcheon.SHIELD, arms.getFirst().clip(), "with --arms, a man's flag on a shield");
+        // Elena has no birthplace: her lozenge is left plain, tinted in her colour.
+        var elena = page.marks(card(c, "I9"));
+        assertTrue(elena.stream().noneMatch(m -> m instanceof ChartPage.FlagMark));
+        assertTrue(elena.stream().anyMatch(m -> m instanceof ChartPage.Orn o && "femaleBg".equals(o.fill())
+                && o.d().equals(Ornaments.Escutcheon.LOZENGE.path(Theme.BAROQUE.cardW() / 2 - 14, -13, 28, 28))));
+        // Text stays inside the frame, between the crest and the id plate.
+        for (var m : marks) {
+            if (m instanceof ChartPage.Txt t && !t.runs().getFirst().style().equals("tag")) {
+                assertTrue(t.y() > 18 && t.y() < Theme.BAROQUE.cardH() - 6, t.runs() + " at " + t.y());
+            }
+        }
+
+        var svg = page.svg(true, ChartPage.Colors.LIGHT);
+        assertTrue(svg.contains("<clipPath id=\"arms-shield\" clipPathUnits=\"objectBoundingBox\">"), "flags cut to the shield");
+        assertTrue(svg.contains("Snell Roundhand") && svg.contains("font:italic"), "script title, italic dates");
+        assertTrue(svg.contains(">The Rossi family</text>") && svg.contains("Family tree with 7 people"), svg.substring(0, 0));
+        assertTrue(svg.contains("translate(26,134)"), "chart inset inside the border and under the heading");
+        var html = page.html(false);
+        assertTrue(html.contains("<svg class=\"orn\"") && html.contains("--c-orn:"), "flourish under the HTML title");
+        assertTrue(html.contains("<body class=\"ornate\">") && html.contains("id=\"hd\"") && html.contains("class=\"cn tl\""),
+                "floating, framed title and controls that can be hidden");
+        var modern = new ChartPage(g, chart("I9", 1, 1), Labels.EN, "t", false, LocalDate.now()).html(false);
+        assertFalse(modern.contains("id=\"hd\"") || modern.contains("class=\"ornate\""), "other themes keep the header bar");
+        var urls = Pattern.compile("https?://[^\"' )]+").matcher(html).results().map(r -> r.group()).distinct().toList();
+        assertEquals(List.of("http://www.w3.org/2000/svg"), urls, "still no external resources");
+
+        System.setProperty("java.awt.headless", "true");
+        for (boolean dark : new boolean[] {false, true}) {
+            var img = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(new PngChart(page, dark).png(1)));
+            assertEquals(dark ? 0x17120c : 0xf2e6cc, img.getRGB(3, 3) & 0xffffff, "parchment / candlelit paper");
+            assertEquals((int) Math.ceil(page.pageW(true)), img.getWidth());
+        }
+        // Leaves along the connectors: a sprig at each bend, drawn once even where siblings' lines share it.
+        var leaves = page.linkMarks();
+        assertFalse(leaves.isEmpty());
+        assertEquals(leaves.size(), leaves.stream().map(m -> ((ChartPage.Orn) m).d()).distinct().count(), "no doubled leaves");
+        assertTrue(new ChartPage(g, chart("I9", 2, 1), Labels.EN, "t", false, LocalDate.now()).linkMarks().isEmpty(), "baroque only");
+        assertEquals("M 5 0 L 5 2", Ornaments.turn("M0 0 L2 0", 5, 0, 1, Math.PI / 2), "turned a quarter clockwise");
+        // Timelines take the baroque look too; classic still can't.
+        assertTrue(Theme.BAROQUE.hasTimeline() && !Theme.CLASSIC.hasTimeline());
+    }
+
     private static ChartPage modernOn(Genealogy g, LocalDate today) {
         var c = Layout.build(g, g.person("I9").orElseThrow(), new Layout.Spec(3, 0, true, Labels.EN, Theme.MODERN));
         return new ChartPage(g, c, Labels.EN, "t", false, today);

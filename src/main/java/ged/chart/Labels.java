@@ -24,8 +24,9 @@ public enum Labels {
 
     private String pick(String en, String es) { return this == EN ? en : es; }
 
-    public String title(String name) { return pick("Family tree of ", "Árbol genealógico de ") + name; }
-    public String timelineTitle(String name) { return pick("Family timeline of ", "Línea de tiempo familiar de ") + name; }
+    /// Subtitle lead-in: `Family tree with 32 people`.
+    public String treeWith(int n) { return pick("Family tree with ", "Árbol genealógico con ") + people(n); }
+    public String timelineWith(int n) { return pick("Family timeline with ", "Línea de tiempo familiar con ") + people(n); }
     public String today() { return pick("Today", "Hoy"); }
     public String estimated() { return pick("Pale: dates estimated", "Claro: fechas estimadas"); }
     public String people(int n) { return n + pick(n == 1 ? " person" : " people", n == 1 ? " persona" : " personas"); }
@@ -48,6 +49,7 @@ public enum Labels {
     public String print() { return pick("Print", "Imprimir"); }
     public String close() { return pick("Close", "Cerrar"); }
     public String noFacts() { return pick("No dates or places recorded.", "Sin fechas ni lugares registrados."); }
+    public String hideControls() { return pick("Hide or show the title and controls", "Ocultar o mostrar el título y los controles"); }
     public String themeAuto() { return pick("Auto", "Auto"); }
     public String themeLight() { return pick("Light", "Claro"); }
     public String themeDark() { return pick("Dark", "Oscuro"); }

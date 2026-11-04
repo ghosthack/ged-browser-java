@@ -4,6 +4,7 @@ import ged.chart.ChartPage.Bar;
 import ged.chart.ChartPage.Box;
 import ged.chart.ChartPage.Dot;
 import ged.chart.ChartPage.FlagMark;
+import ged.chart.ChartPage.Orn;
 import ged.chart.ChartPage.Txt;
 import ged.chart.Layout.Kind;
 import ged.chart.Layout.Link;
@@ -58,8 +59,8 @@ public final class PngChart {
         return Math.min(requested, Math.sqrt(MAX_PIXELS / (width() * height())));
     }
 
-    private double width() { return Math.max(page.width(), 520); }
-    private double height() { return page.chart().height() + 64; }
+    private double width() { return page.pageW(true); }
+    private double height() { return page.pageH(true); }
 
     private Color color(String key) {
         var hex = palette.get(key);
@@ -77,6 +78,7 @@ public final class PngChart {
             attrs.put(TextAttribute.WEIGHT, f.weight() >= 600 ? TextAttribute.WEIGHT_BOLD
                     : f.weight() >= 500 ? TextAttribute.WEIGHT_MEDIUM : TextAttribute.WEIGHT_REGULAR);
             if (f.tracking() > 0) attrs.put(TextAttribute.TRACKING, (float) f.tracking());
+            if (f.italic()) attrs.put(TextAttribute.POSTURE, TextAttribute.POSTURE_OBLIQUE);
             return new Font(attrs);
         });
     }
@@ -96,13 +98,9 @@ public final class PngChart {
             g.setColor(color("paper"));
             g.fill(new Rectangle2D.Double(0, 0, width() + 1, height() + 1));
 
-            g.setFont(font("title"));
-            g.setColor(color(theme.font("title").color()));
-            g.drawString(page.title(), (float) Layout.MARGIN, 38f);
-            g.setFont(font("sub"));
-            g.setColor(color(theme.font("sub").color()));
-            g.drawString(page.subtitle(), (float) Layout.MARGIN, 58f);
-            g.translate(0, 64);
+            for (var m : page.pageMarks(true)) paint(g, m);
+            g.translate(page.pad(), page.originY(true));
+            for (var m : page.chartMarks()) paint(g, m);
 
             g.setFont(font("col"));
             g.setColor(color(theme.font("col").color()));
@@ -125,8 +123,9 @@ public final class PngChart {
             for (var t : page.chart().ties()) g.draw(new Line2D.Double(t.x1(), t.y1(), t.x2(), t.y2()));
 
             g.setColor(color("link"));
-            g.setStroke(new BasicStroke(1.6f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_ROUND));
+            g.setStroke(new BasicStroke(theme.ornate() ? 1.2f : 1.6f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_ROUND));
             for (var k : page.chart().links()) g.draw(elbow(k));
+            for (var m : page.linkMarks()) paint(g, m);
 
             for (var c : page.chart().cards()) {
                 var cg = (Graphics2D) g.create();
@@ -195,13 +194,51 @@ public final class PngChart {
                 g.fill(new Ellipse2D.Double(d.cx() - d.r(), d.cy() - d.r(), 2 * d.r(), 2 * d.r()));
             }
             case FlagMark f -> flag(g, f);
+            case Orn o -> {
+                var shape = path(o.d());
+                if (o.fill() != null) {
+                    g.setColor(color(o.fill()));
+                    g.fill(shape);
+                }
+                if (o.stroke() != null) {
+                    g.setColor(color(o.stroke()));
+                    g.setStroke(o.dashed()
+                            ? new BasicStroke((float) o.strokeW(), BasicStroke.CAP_BUTT, BasicStroke.JOIN_ROUND, 10f, new float[] {5, 4}, 0)
+                            : new BasicStroke((float) o.strokeW(), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                    g.draw(shape);
+                }
+            }
             case Txt t -> text(g, t);
         }
+    }
+
+    /// Replays ornament path data: absolute M, L, C, Q and Z.
+    static Path2D path(String d) {
+        var p = new Path2D.Double();
+        var toks = d.trim().split("\\s+|(?<=[A-Za-z])|(?=[A-Za-z])");
+        int i = 0;
+        char cmd = 'M';
+        while (i < toks.length) {
+            var t = toks[i];
+            if (t.isEmpty()) { i++; continue; }
+            if (Character.isLetter(t.charAt(0))) { cmd = t.charAt(0); i++; if (cmd == 'Z') p.closePath(); continue; }
+            double[] v = new double[switch (cmd) { case 'C' -> 6; case 'Q' -> 4; default -> 2; }];
+            for (int k = 0; k < v.length; k++) v[k] = Double.parseDouble(toks[i++]);
+            switch (cmd) {
+                case 'M' -> { p.moveTo(v[0], v[1]); cmd = 'L'; }
+                case 'L' -> p.lineTo(v[0], v[1]);
+                case 'C' -> p.curveTo(v[0], v[1], v[2], v[3], v[4], v[5]);
+                case 'Q' -> p.quadTo(v[0], v[1], v[2], v[3]);
+                default -> throw new IllegalArgumentException("unsupported path command " + cmd);
+            }
+        }
+        return p;
     }
 
     private void flag(Graphics2D g0, FlagMark f) {
         var g = (Graphics2D) g0.create();
         try {
+            if (f.clip() != null) g.clip(path(f.clip().path(f.x(), f.y(), f.w(), f.h())));
             g.translate(f.x(), f.y());
             g.scale(f.w() / Flags.W, f.h() / Flags.H);
             double r = theme.modern() ? 1.6 : 0;

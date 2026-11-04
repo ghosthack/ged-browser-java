@@ -6,7 +6,9 @@ import java.util.Map;
 
 /// Look of a chart: card geometry, fonts, and colour palettes. `classic`
 /// is the original warm paper look (light only); `modern` adds initials
-/// avatars, large flags, ages, record ids, and a dark palette.
+/// avatars, large flags, ages, record ids, and a dark palette; `baroque`
+/// is a 19th-century engraved look on parchment, with framed cards,
+/// scrollwork and a bordered page (see [Ornaments]), and a candlelit dark.
 ///
 /// Palettes map colour keys (used by [ChartPage] marks and the HTML page
 /// chrome) to hex colours. In HTML each key becomes a CSS variable
@@ -16,14 +18,22 @@ public record Theme(String name, double cardW, double cardH, double stack, doubl
                     Map<String, String> light, Map<String, String> dark) {
 
     /// A text style. `java` lists font families to try for PNG, in order.
-    public record Font(String css, List<String> java, int weight, double size, double tracking, boolean upper, String color) {
+    public record Font(String css, List<String> java, int weight, double size, double tracking, boolean upper, String color,
+                       boolean italic) {
+        public Font(String css, List<String> java, int weight, double size, double tracking, boolean upper, String color) {
+            this(css, java, weight, size, tracking, upper, color, false);
+        }
+
         public String cssFont() {
-            return weight + " " + ChartPage.n(size) + "px " + css;
+            return (italic ? "italic " : "") + weight + " " + ChartPage.n(size) + "px " + css;
         }
     }
 
     public boolean hasDark() { return dark != null; }
     public boolean modern() { return name.equals("modern"); }
+    public boolean ornate() { return name.equals("baroque"); }
+    /// Timelines need the tinted palette and id/age styles classic lacks.
+    public boolean hasTimeline() { return light.containsKey("maleBg") && fonts.containsKey("id"); }
     public double pitch() { return cardW + colGap; }
 
     public Font font(String style) {
@@ -40,7 +50,8 @@ public record Theme(String name, double cardW, double cardH, double stack, doubl
         return switch (name.toLowerCase(Locale.ROOT)) {
             case "classic" -> CLASSIC;
             case "modern" -> MODERN;
-            default -> throw new IllegalArgumentException("unknown theme '" + name + "' (use classic or modern)");
+            case "baroque" -> BAROQUE;
+            default -> throw new IllegalArgumentException("unknown theme '" + name + "' (use modern, classic or baroque)");
         };
     }
 
@@ -119,4 +130,54 @@ public record Theme(String name, double cardW, double cardH, double stack, doubl
                     Map.entry("male", "#9cc2f0"), Map.entry("female", "#f0a7c0"), Map.entry("unknown", "#c4beb4"),
                     Map.entry("maleBg", "#233449"), Map.entry("femaleBg", "#47283a"), Map.entry("unknownBg", "#34373c"),
                     Map.entry("flagLine", "#ffffff")));
+
+    // ---- baroque -----------------------------------------------------------
+
+    static final String OLD_CSS = "'Hoefler Text','Big Caslon',Baskerville,'Baskerville Old Face','Palatino Linotype',Palatino,Georgia,serif";
+    static final List<String> OLD = List.of("Hoefler Text", "Big Caslon", "Baskerville", "Baskerville Old Face", "Palatino Linotype", "Palatino", "Georgia", "Serif");
+    static final String SCRIPT_CSS = "'Snell Roundhand','Apple Chancery','Edwardian Script ITC','Palatino Linotype',Palatino,Georgia,serif";
+    static final List<String> SCRIPT = List.of("Snell Roundhand", "Apple Chancery", "Edwardian Script ITC", "Palatino Linotype", "Palatino", "Serif");
+
+    private static Font old(int w, double size, String color, boolean italic) {
+        return new Font(OLD_CSS, OLD, w, size, 0, false, color, italic);
+    }
+
+    public static final Theme BAROQUE = new Theme("baroque", 272, 108, 24, 18, 76, 30, 0,
+            Map.ofEntries(
+                    Map.entry("title", new Font(SCRIPT_CSS, SCRIPT, 700, 34, 0, false, "ink", true)),
+                    Map.entry("sub", old(400, 12.5, "pl", true)),
+                    Map.entry("col", new Font(OLD_CSS, OLD, 600, 11, 0.22, true, "col")),
+                    Map.entry("nm", old(600, 16.5, "ink", false)),
+                    Map.entry("yr", old(400, 13, "yr", true)),
+                    Map.entry("age", old(400, 12.5, "age", true)),
+                    Map.entry("pl", old(400, 11.5, "pl", true)),
+                    Map.entry("tag", old(600, 12, "tag", true)),
+                    Map.entry("id", new Font(OLD_CSS, OLD, 600, 9.5, 0.12, true, "idText")),
+                    Map.entry("ini", old(600, 13, "ink", false))),
+            Map.ofEntries(
+                    Map.entry("paper", "#f2e6cc"), Map.entry("ink", "#2e1f12"), Map.entry("muted", "#7a6247"),
+                    Map.entry("line", "#dcc9a3"), Map.entry("panel", "#fbf3df"), Map.entry("btn", "#fbf3df"),
+                    Map.entry("btnLine", "#c9b083"), Map.entry("btnHover", "#efe2c4"), Map.entry("href", "#7a2e22"),
+                    Map.entry("card", "#fbf4e1"), Map.entry("cardLine", "#7d5e30"), Map.entry("hover", "#5a3f1c"),
+                    Map.entry("rootFill", "#f8ebc7"), Map.entry("repeatFill", "#f5ecd8"), Map.entry("accent", "#8b2e23"),
+                    Map.entry("orn", "#9a7433"), Map.entry("link", "#a88b5e"), Map.entry("col", "#7d5e30"),
+                    Map.entry("yr", "#4a3520"), Map.entry("age", "#7a6247"), Map.entry("pl", "#6e573c"),
+                    Map.entry("tag", "#8b2e23"), Map.entry("tagBg", "#f2e6cc"),
+                    Map.entry("idText", "#8a7050"), Map.entry("idBg", "#fbf4e1"),
+                    Map.entry("male", "#2f4a6b"), Map.entry("female", "#8b2e3f"), Map.entry("unknown", "#6b5a45"),
+                    Map.entry("maleBg", "#d9dcd2"), Map.entry("femaleBg", "#ecd6c8"), Map.entry("unknownBg", "#e4d8c0"),
+                    Map.entry("flagLine", "#2e1f12")),
+            Map.ofEntries(
+                    Map.entry("paper", "#17120c"), Map.entry("ink", "#efe3c8"), Map.entry("muted", "#a8946f"),
+                    Map.entry("line", "#3a2e1e"), Map.entry("panel", "#221a11"), Map.entry("btn", "#241b12"),
+                    Map.entry("btnLine", "#4d3c25"), Map.entry("btnHover", "#30251a"), Map.entry("href", "#e3b97a"),
+                    Map.entry("card", "#211910"), Map.entry("cardLine", "#a8823f"), Map.entry("hover", "#e0c48a"),
+                    Map.entry("rootFill", "#2e2312"), Map.entry("repeatFill", "#1c150e"), Map.entry("accent", "#d9a85b"),
+                    Map.entry("orn", "#c9a45a"), Map.entry("link", "#6e5a3a"), Map.entry("col", "#c9a45a"),
+                    Map.entry("yr", "#dccdaa"), Map.entry("age", "#a8946f"), Map.entry("pl", "#b09c78"),
+                    Map.entry("tag", "#e0b46a"), Map.entry("tagBg", "#17120c"),
+                    Map.entry("idText", "#a8946f"), Map.entry("idBg", "#211910"),
+                    Map.entry("male", "#9fb6d3"), Map.entry("female", "#dba3ac"), Map.entry("unknown", "#c4b49a"),
+                    Map.entry("maleBg", "#2a2d2c"), Map.entry("femaleBg", "#3a2522"), Map.entry("unknownBg", "#2f281d"),
+                    Map.entry("flagLine", "#efe3c8")));
 }

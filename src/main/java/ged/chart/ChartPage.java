@@ -47,19 +47,28 @@ public final class ChartPage {
         this.today = today;
     }
 
+    private boolean arms;
+
+    /// Baroque only: bear the flag on a shield (men) or lozenge (women) instead of a plain medallion.
+    public ChartPage arms(boolean on) {
+        this.arms = on;
+        return this;
+    }
+
     Chart chart() { return chart; }
     Theme theme() { return theme; }
     String title() { return title; }
 
     public String subtitle() {
         int gens = chart.up() + chart.down() + 1;
-        return l.people(chart.peopleCount()) + " · " + l.generations(gens) + " · " + l.made(today);
+        int n = chart.peopleCount();
+        return (chart.timeline() ? l.timelineWith(n) : l.treeWith(n)) + " · " + l.generations(gens) + " · " + l.made(today);
     }
 
     // ---- marks ---------------------------------------------------------------
 
     /// Something drawn on a card, in card coordinates. Colours are palette keys.
-    sealed interface Mark permits Box, Bar, Dot, Txt, FlagMark {}
+    sealed interface Mark permits Box, Bar, Dot, Txt, FlagMark, Orn {}
 
     /// Rounded rectangle; `cls` tags the card background for hover/selection.
     record Box(double x, double y, double w, double h, double r, String fill, String stroke, double strokeW,
@@ -81,10 +90,19 @@ public final class ChartPage {
         }
     }
 
-    record FlagMark(Flags.Flag flag, double x, double y, double w, double h) implements Mark {}
+    /// A flag stretched to (w × h); `clip` names an [Ornaments.Escutcheon] to cut it to, or is null.
+    record FlagMark(Flags.Flag flag, double x, double y, double w, double h, Ornaments.Escutcheon clip) implements Mark {
+        FlagMark(Flags.Flag flag, double x, double y, double w, double h) { this(flag, x, y, w, h, null); }
+    }
+
+    /// An ornament or frame as SVG path data (absolute M/L/C/Q/Z only); null fill or stroke = none.
+    record Orn(String d, String fill, String stroke, double strokeW, boolean dashed, String cls) implements Mark {
+        Orn(String d, String fill, String stroke, double strokeW) { this(d, fill, stroke, strokeW, false, null); }
+    }
 
     List<Mark> marks(Card c) {
         if (c.span() != null) return timelineMarks(c);
+        if (theme.ornate()) return baroqueMarks(c);
         return theme.modern() ? modernMarks(c) : classicMarks(c);
     }
 
@@ -254,6 +272,77 @@ public final class ChartPage {
         return out;
     }
 
+    /// An engraved cartouche: concave-cornered frame with an inner rule,
+    /// scrollwork in the corners, a crest tinted by sex, everything centred,
+    /// and the record id on a plate between two lozenges.
+    private List<Mark> baroqueMarks(Card c) {
+        double W = theme.cardW(), H = theme.cardH(), cx = W / 2;
+        var p = c.person();
+        boolean root = c.kind() == Kind.ROOT, repeat = c.kind() == Kind.REPEAT;
+        var out = new ArrayList<Mark>();
+
+        c.family().map(this::marriageTag).ifPresent(tag ->
+                out.add(Txt.of(tag, "tag", theme.tieX() + 10, -theme.stack() / 2 + 4.5)));
+
+        out.add(new Orn(Ornaments.frame(0, 0, W, H, 9), root ? "rootFill" : repeat ? "repeatFill" : "card",
+                root ? "accent" : "cardLine", root ? 2 : 1.3, repeat, "bg"));
+        out.add(new Orn(Ornaments.frame(5, 5, W - 10, H - 10, 6), null, "orn", 0.6));
+        Ornaments.corners(out, 7.5, 7.5, W - 15, H - 15, 0.62, "orn", 0.8);
+        var sex = sexKey(p);
+        var flag = repeat ? Optional.<Flags.Flag>empty() : Flags.forPlace(birthPlace(p));
+        if (arms) {
+            // Arms on the top edge, as heraldry has it: a shield for a man, a lozenge
+            // for a woman (an oval when unknown), bearing the birth country's flag,
+            // or left plain and tinted when there's no country to show.
+            var shape = Ornaments.Escutcheon.of(p.sex());
+            double aw = shape.w(), ah = shape.h(), ax = cx - aw / 2, ay = shape.top();
+            Ornaments.medallionCurls(out, cx, aw, "orn");
+            out.add(new Orn(shape.path(ax - 2.6, ay - 2.6, aw + 5.2, ah + 5.2), root ? "rootFill" : "card", sex, 1.3));
+            if (flag.isPresent()) out.add(new FlagMark(flag.get(), ax, ay, aw, ah, shape));
+            else out.add(new Orn(shape.path(ax, ay, aw, ah), sex + "Bg", null, 0));
+            out.add(new Orn(shape.path(ax, ay, aw, ah), null, "flagLine", 0.4));
+        } else if (flag.isPresent()) {
+            // The birth country's flag as a medallion on the top edge, framed in the person's colour.
+            double fw = 22, fh = 14.6, fy = -fh / 2 + 1;
+            Ornaments.medallionCurls(out, cx, fw, "orn");
+            out.add(new Box(cx - fw / 2 - 2.5, fy - 2.5, fw + 5, fh + 5, 2.5, root ? "rootFill" : "card", sex, 1.3, false, null));
+            out.add(new FlagMark(flag.get(), cx - fw / 2, fy, fw, fh));
+        } else {
+            Ornaments.crest(out, cx, 12, sex, "orn");
+        }
+
+        var idf = theme.font("id");
+        double idW = measure(p.key(), idf);
+        out.add(new Txt(List.of(new Run(p.key(), "id", null)), cx, H - 10.5, "middle", 0));
+        Ornaments.plate(out, cx, H - 13.8, idW + 12, "orn");
+
+        double inner = W - 44;
+        var nm = theme.font("nm");
+        var names = nameLines(p, inner, nm);
+        var years = years(p);
+        var age = age(p);
+        var place = repeat ? l.repeat() : place(p, inner);
+        if (!place.isEmpty()) place = fit(place, inner, theme.font("pl"));
+
+        boolean yearLine = !years.isEmpty() || !age.isEmpty();
+        double step = names.size() > 1 ? 17.5 : 19;
+        double total = names.size() * step + (yearLine ? 17 : 0) + (place.isEmpty() ? 0 : 15);
+        double y = 19 + (H - 19 - 22 - total) / 2 + 13;
+        for (var line : names) {
+            out.add(new Txt(List.of(new Run(line, "nm", null)), cx, y, "middle", squeeze(line, inner, nm)));
+            y += step;
+        }
+        if (yearLine) {
+            var runs = new ArrayList<Run>();
+            if (!years.isEmpty()) runs.add(new Run(years.replace(" – ", "–"), "yr", null));
+            if (!age.isEmpty()) runs.add(new Run((years.isEmpty() ? "" : "  ·  ") + age, "age", null));
+            out.add(new Txt(runs, cx, y, "middle", 0));
+            y += 16;
+        }
+        if (!place.isEmpty()) out.add(new Txt(List.of(new Run(place, "pl", null)), cx, y, "middle", 0));
+        return out;
+    }
+
     private String initials(Person p) {
         var nm = p.name();
         var a = firstLetter(nm.given());
@@ -420,6 +509,63 @@ public final class ChartPage {
         return f.event("DIV").isPresent() ? tag + " · " + l.divorced() : tag;
     }
 
+    // ---- page ----------------------------------------------------------------
+
+    /// Room around the chart for the ornate page border.
+    double pad() { return theme.ornate() ? 26 : 0; }
+
+    /// Height of the drawn heading (standalone SVG and PNG).
+    double headH() { return theme.ornate() ? 108 : 64; }
+
+    double pageW(boolean heading) { return Math.max(width(), heading ? (theme.ornate() ? 640 : 520) : 0) + 2 * pad(); }
+
+    double pageH(boolean heading) { return chart.height() + (heading ? headH() : 0) + 2 * pad(); }
+
+    /// Where the chart itself starts on the page.
+    double originY(boolean heading) { return pad() + (heading ? headH() : 0); }
+
+    /// The page border and heading, in page coordinates.
+    List<Mark> pageMarks(boolean heading) {
+        var out = new ArrayList<Mark>();
+        double w = pageW(heading);
+        if (theme.ornate()) out.addAll(Ornaments.border(w, pageH(heading), "orn"));
+        if (!heading) return out;
+        if (theme.ornate()) {
+            double cx = w / 2, top = pad();
+            out.add(new Txt(List.of(new Run(title, "title", null)), cx, top + 50, "middle", squeeze(title, w - 120, theme.font("title"))));
+            Ornaments.flourish(out, cx, top + 70, "orn");
+            out.add(new Txt(List.of(new Run(subtitle(), "sub", null)), cx, top + 94, "middle", 0));
+        } else {
+            out.add(Txt.of(title, "title", Layout.MARGIN, 38));
+            out.add(Txt.of(subtitle(), "sub", Layout.MARGIN, 58));
+        }
+        return out;
+    }
+
+    /// Decoration in chart coordinates: swashes beside the column headings.
+    List<Mark> chartMarks() {
+        var out = new ArrayList<Mark>();
+        if (!theme.ornate() || chart.timeline()) return out;   // a year axis is too dense for swashes
+        var f = theme.font("col");
+        for (var c : chart.columns()) {
+            var label = f.upper() ? c.label().toUpperCase(Locale.ROOT) : c.label();
+            Ornaments.swashes(out, c.centerX(), Layout.MARGIN + 6.5, measure(label, f), "orn");
+        }
+        return out;
+    }
+
+    /// Baroque tree: leaves along the connectors, drawn over the lines.
+    List<Mark> linkMarks() {
+        var out = new ArrayList<Mark>();
+        if (!theme.ornate() || chart.timeline()) return out;
+        var seen = new java.util.HashSet<String>();
+        for (var k : chart.links()) {
+            double mx = (k.x1() + k.x2()) / 2, r = Math.min(10, Math.abs(k.y2() - k.y1()) / 2);
+            Ornaments.vine(out, k.x1(), k.y1(), k.x2(), k.y2(), r, mx, seen, "orn");
+        }
+        return out;
+    }
+
     // ---- SVG -----------------------------------------------------------------
 
     /// How SVG colours are written: as CSS variables (HTML page, switchable),
@@ -445,21 +591,17 @@ public final class ChartPage {
     /// The chart as SVG. With `heading`, the title is drawn inside it (for a
     /// standalone .svg file); the HTML page has its own heading instead.
     public String svg(boolean heading, Colors mode) {
-        double top = heading ? 64 : 0;
-        double w = Math.max(width(), heading ? 520 : 0), h = chart.height() + top;
+        double w = pageW(heading), h = pageH(heading), ox = pad(), oy = originY(heading);
         var sb = new StringBuilder();
         sb.append("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ").append(n(w)).append(' ').append(n(h))
                 .append("\" width=\"").append(n(w)).append("\" height=\"").append(n(h)).append("\" role=\"img\" aria-label=\"")
                 .append(esc(title)).append("\">\n");
         sb.append(flagDefs(mode));
-        if (heading) {
-            sb.append("<rect width=\"100%\" height=\"100%\" style=\"fill:").append(color("paper", mode)).append("\"/>\n");
-            sb.append("<text x=\"").append(n(Layout.MARGIN)).append("\" y=\"38\" style=\"").append(fontStyle("title", null, mode))
-                    .append("\">").append(esc(title)).append("</text>\n");
-            sb.append("<text x=\"").append(n(Layout.MARGIN)).append("\" y=\"58\" style=\"").append(fontStyle("sub", null, mode))
-                    .append("\">").append(esc(subtitle())).append("</text>\n");
-            sb.append("<g transform=\"translate(0,").append(n(top)).append(")\">\n");
-        }
+        if (heading) sb.append("<rect width=\"100%\" height=\"100%\" style=\"fill:").append(color("paper", mode)).append("\"/>\n");
+        for (var m : pageMarks(heading)) paint(sb, m, mode);
+        boolean shifted = ox != 0 || oy != 0;
+        if (shifted) sb.append("\n<g transform=\"translate(").append(n(ox)).append(',').append(n(oy)).append(")\">\n");
+        for (var m : chartMarks()) paint(sb, m, mode);
         for (var c : chart.columns()) {
             var label = theme.font("col").upper() ? c.label().toUpperCase(Locale.ROOT) : c.label();
             sb.append("<text x=\"").append(n(c.centerX())).append("\" y=\"").append(n(Layout.MARGIN + 10))
@@ -476,10 +618,11 @@ public final class ChartPage {
                     .append("\" y2=\"").append(n(t.y2())).append("\" style=\"stroke:").append(color("accent", mode))
                     .append(";stroke-width:2;stroke-dasharray:2 2\"/>\n");
         }
-        var linkStyle = "fill:none;stroke:" + color("link", mode) + ";stroke-width:1.6";
+        var linkStyle = "fill:none;stroke:" + color("link", mode) + ";stroke-width:" + (theme.ornate() ? "1.2" : "1.6");
         for (var lk : chart.links()) sb.append("<path d=\"").append(elbow(lk)).append("\" style=\"").append(linkStyle).append("\"/>\n");
+        for (var m : linkMarks()) paint(sb, m, mode);
         for (var c : chart.cards()) card(sb, c, mode);
-        if (heading) sb.append("</g>\n");
+        if (shifted) sb.append("</g>\n");
         return sb.append("</svg>\n").toString();
     }
 
@@ -490,59 +633,86 @@ public final class ChartPage {
                 .append("\" transform=\"translate(").append(n(c.x())).append(',').append(n(c.y())).append(")\"")
                 .append(c.kind() == Kind.REPEAT ? " opacity=\".8\"" : "").append(">");
         sb.append("<title>").append(esc(p.name().full().isEmpty() ? l.unnamed() : p.name().full())).append("</title>");
-        for (var m : marks(c)) {
-            switch (m) {
-                case Box b -> {
-                    sb.append("<rect").append(b.cls() == null ? "" : " class=\"" + b.cls() + "\"")
-                            .append(" x=\"").append(n(b.x())).append("\" y=\"").append(n(b.y()))
-                            .append("\" width=\"").append(n(b.w())).append("\" height=\"").append(n(b.h()))
-                            .append("\" rx=\"").append(n(b.r())).append("\" style=\"fill:").append(b.fill() == null ? "none" : color(b.fill(), mode));
-                    if (b.stroke() != null) {
-                        sb.append(";stroke:").append(color(b.stroke(), mode)).append(";stroke-width:").append(n(b.strokeW()));
-                        if (b.dashed()) sb.append(";stroke-dasharray:5 4");
-                    }
-                    sb.append("\"/>");
+        for (var m : marks(c)) paint(sb, m, mode);
+        sb.append("</g>\n");
+    }
+
+    private void paint(StringBuilder sb, Mark m, Colors mode) {
+        switch (m) {
+            case Box b -> {
+                sb.append("<rect").append(b.cls() == null ? "" : " class=\"" + b.cls() + "\"")
+                        .append(" x=\"").append(n(b.x())).append("\" y=\"").append(n(b.y()))
+                        .append("\" width=\"").append(n(b.w())).append("\" height=\"").append(n(b.h()))
+                        .append("\" rx=\"").append(n(b.r())).append("\" style=\"fill:").append(b.fill() == null ? "none" : color(b.fill(), mode));
+                if (b.stroke() != null) {
+                    sb.append(";stroke:").append(color(b.stroke(), mode)).append(";stroke-width:").append(n(b.strokeW()));
+                    if (b.dashed()) sb.append(";stroke-dasharray:5 4");
                 }
-                case Bar b -> sb.append("<path d=\"M").append(n(b.r())).append(" 0A").append(n(b.r())).append(' ').append(n(b.r()))
-                        .append(" 0 0 0 0 ").append(n(b.r())).append("V").append(n(b.h() - b.r())).append("A").append(n(b.r()))
-                        .append(' ').append(n(b.r())).append(" 0 0 0 ").append(n(b.r())).append(' ').append(n(b.h()))
-                        .append("Z\" style=\"fill:").append(color(b.fill(), mode)).append("\"/>");
-                case Dot d -> sb.append("<circle cx=\"").append(n(d.cx())).append("\" cy=\"").append(n(d.cy()))
-                        .append("\" r=\"").append(n(d.r())).append("\" style=\"fill:").append(color(d.fill(), mode)).append("\"/>");
-                case FlagMark f -> sb.append("<use href=\"#flag-").append(f.flag().code()).append("\" x=\"").append(n(f.x()))
-                        .append("\" y=\"").append(n(f.y())).append("\" width=\"").append(n(f.w())).append("\" height=\"")
-                        .append(n(f.h())).append("\"><title>").append(esc(f.flag().country())).append("</title></use>");
-                case Txt t -> {
-                    sb.append("<text x=\"").append(n(t.x())).append("\" y=\"").append(n(t.y())).append('"');
-                    if (!t.anchor().equals("start")) sb.append(" text-anchor=\"").append(t.anchor()).append('"');
-                    if (t.squeezeTo() > 0) sb.append(" textLength=\"").append(n(t.squeezeTo())).append("\" lengthAdjust=\"spacingAndGlyphs\"");
-                    if (t.runs().size() == 1) {
-                        var r = t.runs().getFirst();
-                        sb.append(" style=\"").append(fontStyle(r.style(), r.color(), mode)).append("\">").append(esc(r.text()));
-                    } else {
-                        sb.append('>');
-                        for (var r : t.runs()) {
-                            sb.append("<tspan style=\"").append(fontStyle(r.style(), r.color(), mode)).append("\">")
-                                    .append(esc(r.text()).replace("  ", "  ")).append("</tspan>");
-                        }
+                sb.append("\"/>");
+            }
+            case Bar b -> sb.append("<path d=\"M").append(n(b.r())).append(" 0A").append(n(b.r())).append(' ').append(n(b.r()))
+                    .append(" 0 0 0 0 ").append(n(b.r())).append("V").append(n(b.h() - b.r())).append("A").append(n(b.r()))
+                    .append(' ').append(n(b.r())).append(" 0 0 0 ").append(n(b.r())).append(' ').append(n(b.h()))
+                    .append("Z\" style=\"fill:").append(color(b.fill(), mode)).append("\"/>");
+            case Dot d -> sb.append("<circle cx=\"").append(n(d.cx())).append("\" cy=\"").append(n(d.cy()))
+                    .append("\" r=\"").append(n(d.r())).append("\" style=\"fill:").append(color(d.fill(), mode)).append("\"/>");
+            case FlagMark f -> sb.append("<use href=\"#flag-").append(f.flag().code()).append("\" x=\"").append(n(f.x()))
+                    .append("\" y=\"").append(n(f.y())).append("\" width=\"").append(n(f.w())).append("\" height=\"")
+                    .append(n(f.h())).append('"')
+                    .append(f.clip() == null ? "" : " clip-path=\"url(#arms-" + f.clip().id() + ")\"")
+                    .append("><title>").append(esc(f.flag().country())).append("</title></use>");
+            case Orn o -> {
+            sb.append("<path").append(o.cls() == null ? "" : " class=\"" + o.cls() + "\"").append(" d=\"").append(o.d())
+                    .append("\" style=\"fill:").append(o.fill() == null ? "none" : color(o.fill(), mode));
+            if (o.stroke() != null) {
+                sb.append(";stroke:").append(color(o.stroke(), mode)).append(";stroke-width:").append(n(o.strokeW()))
+                        .append(";stroke-linecap:round;stroke-linejoin:round");
+                if (o.dashed()) sb.append(";stroke-dasharray:5 4");
+            }
+            sb.append("\"/>");
+        }
+        case Txt t -> {
+                sb.append("<text x=\"").append(n(t.x())).append("\" y=\"").append(n(t.y())).append('"');
+                if (!t.anchor().equals("start")) sb.append(" text-anchor=\"").append(t.anchor()).append('"');
+                if (t.squeezeTo() > 0) sb.append(" textLength=\"").append(n(t.squeezeTo())).append("\" lengthAdjust=\"spacingAndGlyphs\"");
+                if (t.runs().size() == 1) {
+                    var r = t.runs().getFirst();
+                    sb.append(" style=\"").append(fontStyle(r.style(), r.color(), mode)).append("\">").append(esc(r.text()));
+                } else {
+                    sb.append('>');
+                    for (var r : t.runs()) {
+                        sb.append("<tspan style=\"").append(fontStyle(r.style(), r.color(), mode)).append("\">")
+                                .append(esc(r.text()).replace("  ", "  ")).append("</tspan>");
                     }
-                    sb.append("</text>");
                 }
+                sb.append("</text>");
             }
         }
-        sb.append("</g>\n");
     }
 
     /// One `<symbol>` per flag used on the chart, referenced by the cards.
     private String flagDefs(Colors mode) {
         var used = new TreeMap<String, Flags.Flag>();
-        for (var c : chart.cards()) for (var m : marks(c)) if (m instanceof FlagMark f) used.put(f.flag().code(), f.flag());
+        var clips = new java.util.TreeSet<Ornaments.Escutcheon>();
+        for (var c : chart.cards()) {
+            for (var m : marks(c)) {
+                if (m instanceof FlagMark f) {
+                    used.put(f.flag().code(), f.flag());
+                    if (f.clip() != null) clips.add(f.clip());
+                }
+            }
+        }
         if (used.isEmpty()) return "";
         double r = theme.modern() ? 1.6 : 0;
         var sb = new StringBuilder("<defs>\n<clipPath id=\"flag-clip\"><rect width=\"18\" height=\"12\" rx=\"")
                 .append(n(r)).append("\"/></clipPath>\n");
+        // Escutcheon outlines in the flag's own box (0–1), so one clip fits every size.
+        for (var e : clips) {
+            sb.append("<clipPath id=\"arms-").append(e.id()).append("\" clipPathUnits=\"objectBoundingBox\"><path d=\"")
+                    .append(e.path(0, 0, 1, 1)).append("\"/></clipPath>\n");
+        }
         for (var f : used.values()) {
-            sb.append("<symbol id=\"flag-").append(f.code()).append("\" viewBox=\"0 0 18 12\"><g clip-path=\"url(#flag-clip)\">");
+            sb.append("<symbol id=\"flag-").append(f.code()).append("\" viewBox=\"0 0 18 12\" preserveAspectRatio=\"none\"><g clip-path=\"url(#flag-clip)\">");
             for (var sh : f.shapes()) {
                 var v = sh.v();
                 switch (sh.kind()) {
@@ -587,6 +757,14 @@ public final class ChartPage {
                 .replace("{{lang}}", l.code())
                 .replace("{{scheme}}", theme.hasDark() ? "light dark" : "light")
                 .replace("{{vars}}", cssVars())
+                .replace("{{themeCss}}", theme.ornate() ? ORNATE_CSS.replace("{{old}}", Theme.OLD_CSS).replace("{{script}}", Theme.SCRIPT_CSS) : "")
+                .replace("{{titleOrnament}}", theme.ornate() ? titleOrnament() : "")
+                .replace("{{deco}}", theme.ornate() ? cornerDeco() : "")
+                .replace("{{bodyClass}}", theme.ornate() ? " class=\"ornate\"" : "")
+                .replace("{{hideButton}}", theme.ornate()
+                        ? "<button id=\"hd\" aria-pressed=\"false\" aria-label=\"" + esc(l.hideControls()) + "\" title=\""
+                          + esc(l.hideControls()) + "\">❦\uFE0E</button>" : "")
+                .replace("{{toolsHint}}", theme.ornate() ? "<div class=\"thint\">" + esc(l.hint()) + "</div>" : "")
                 .replace("{{start}}", startDark ? " data-theme=\"dark\"" : "")
                 .replace("{{title}}", esc(title))
                 .replace("{{subtitle}}", esc(subtitle()))
@@ -735,6 +913,67 @@ public final class ChartPage {
         };
     }
 
+    /// The flourish under the HTML page's title.
+    private String titleOrnament() {
+        var marks = new ArrayList<Mark>();
+        Ornaments.flourish(marks, 120, 10, "orn");
+        var sb = new StringBuilder("<svg class=\"orn\" viewBox=\"0 0 240 20\" width=\"240\" height=\"20\" aria-hidden=\"true\">");
+        for (var m : marks) paint(sb, m, Colors.VARS);
+        return sb.append("</svg>").toString();
+    }
+
+    /// Scrollwork for the four corners of a floating panel (mirrored by CSS).
+    private String cornerDeco() {
+        var marks = new ArrayList<Mark>();
+        Ornaments.corner(marks, 1.5, 1.5, 1.25, 1.25, "orn", 0.9);
+        var sb = new StringBuilder("<svg viewBox=\"0 0 28 28\" width=\"28\" height=\"28\">");
+        for (var m : marks) paint(sb, m, Colors.VARS);
+        var one = sb.append("</svg>").toString();
+        var out = new StringBuilder();
+        for (var pos : List.of("tl", "tr", "bl", "br")) out.append("<span class=\"cn ").append(pos).append("\" aria-hidden=\"true\">").append(one).append("</span>");
+        return out.toString();
+    }
+
+    private static final String ORNATE_CSS = """
+              body{font-family:{{old}}}
+              .legend{display:none}
+              /* Title plaque and controls float over the chart, framed like the cards. */
+              header{position:fixed;top:18px;left:0;right:0;z-index:5;display:block;padding:0;border:none;pointer-events:none}
+              .plate,.tools{pointer-events:auto;background:color-mix(in srgb,var(--c-panel) 95%,transparent);border:1px solid var(--c-cardLine);border-radius:3px;
+                box-shadow:0 0 0 4px var(--c-panel),0 0 0 5px var(--c-orn),0 12px 30px rgba(0,0,0,.25);transition:opacity .25s,transform .25s,visibility .25s}
+              .plate{position:relative;width:max-content;max-width:calc(100vw - 600px);min-width:min(420px,calc(100vw - 600px));margin:0 auto;text-align:center;padding:14px 56px 12px}
+              h1{font:italic 700 34px/1.15 {{script}};letter-spacing:0}
+              .sub{font-style:italic;font-size:14px}
+              svg.orn{display:block;margin:2px auto 3px}
+              .tools{position:fixed;top:18px;right:78px;flex-direction:column;align-items:stretch;gap:8px;padding:22px 22px 16px}
+              .tools .row{justify-content:center}
+              .thint{font-style:italic;font-size:12px;color:var(--c-muted);text-align:center;max-width:220px;line-height:1.3}
+              .cn{position:absolute;width:28px;height:28px;pointer-events:none;line-height:0}
+              .cn.tl{top:2px;left:2px}.cn.tr{top:2px;right:2px;transform:scaleX(-1)}
+              .cn.bl{bottom:2px;left:2px;transform:scaleY(-1)}.cn.br{bottom:2px;right:2px;transform:scale(-1,-1)}
+              #hd{position:fixed;top:22px;right:20px;z-index:6;width:42px;height:42px;min-width:0;border-radius:50%;padding:0;font-size:22px;line-height:1;
+                color:var(--c-orn);background:var(--c-panel);border:1px solid var(--c-cardLine);box-shadow:0 0 0 3px var(--c-panel),0 0 0 4px var(--c-orn),0 6px 16px rgba(0,0,0,.2)}
+              #hd[aria-pressed=true]{color:var(--c-muted)}
+              body.bare .plate,body.bare .tools,body.scrolled .plate{opacity:0;visibility:hidden;transform:translateY(-10px)}
+              @media (max-width:900px){
+                .plate{max-width:calc(100vw - 150px);min-width:0;padding:10px 30px}
+                .sub{font-size:12.5px}
+                h1{font-size:25px}
+                .tools{top:auto;bottom:16px;right:16px}
+                .thint{display:none}
+              }
+              aside{border-color:var(--c-cardLine);border-radius:4px;box-shadow:0 0 0 4px var(--c-panel),0 0 0 5px var(--c-orn),0 14px 34px rgba(0,0,0,.28)}
+              aside h2{font:600 22px/1.25 {{old}}}
+              aside h3{font-style:italic;letter-spacing:.12em;color:var(--c-orn)}
+              button{border-radius:3px;font-style:italic}
+              .card:hover .bg{stroke-width:1.8px}
+              @media print{
+                header{position:static}
+                .plate{box-shadow:none;margin:0 auto 8px}
+                #hd{display:none!important}
+              }
+            """;
+
     private static final String PAGE = """
             <!doctype html>
             <html lang="{{lang}}"{{start}}>
@@ -752,6 +991,7 @@ public final class ChartPage {
               h1{font:700 26px/1.2 'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;margin:0;letter-spacing:-.01em}
               .sub{color:var(--c-muted);font-size:13.5px;margin-top:3px}
               .tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+              .tools .row{display:flex;gap:6px;align-items:center}
               button{font:inherit;font-size:14px;border:1px solid var(--c-btnLine);background:var(--c-btn);color:var(--c-ink);border-radius:8px;padding:6px 12px;cursor:pointer;min-width:38px}
               button:hover{background:var(--c-btnHover)}
               #zl{min-width:48px;text-align:center;color:var(--c-muted);font-size:13px}
@@ -780,6 +1020,7 @@ public final class ChartPage {
               aside a{color:var(--c-href);cursor:pointer;text-decoration:underline;text-decoration-color:color-mix(in srgb,var(--c-href) 35%,transparent)}
               aside p{margin:4px 0;white-space:pre-wrap}
               @media (max-width:640px){header{padding:12px 16px 8px}.legend{padding:8px 16px}.legend .hint{margin-left:0}h1{font-size:21px}}
+            {{themeCss}}
               @media print{
                 @page{size:landscape;margin:10mm}
                 html,body{height:auto;display:block;background:#fff}
@@ -790,14 +1031,15 @@ public final class ChartPage {
               }
             </style>
             </head>
-            <body>
+            <body{{bodyClass}}>
             <header>
-              <div><h1>{{title}}</h1><div class="sub">{{subtitle}}</div></div>
-              <div class="tools">
-                <button id="zo" aria-label="Zoom out">−</button><span id="zl">100%</span><button id="zi" aria-label="Zoom in">+</button>
-                <button id="zf">{{fit}}</button>{{themeButton}}<button id="pr">{{print}}</button>
+              <div class="plate">{{deco}}<h1>{{title}}</h1>{{titleOrnament}}<div class="sub">{{subtitle}}</div></div>
+              <div class="tools">{{deco}}
+                <span class="row"><button id="zo" aria-label="Zoom out">−</button><span id="zl">100%</span><button id="zi" aria-label="Zoom in">+</button></span>
+                <span class="row"><button id="zf">{{fit}}</button>{{themeButton}}<button id="pr">{{print}}</button></span>{{toolsHint}}
               </div>
             </header>
+            {{hideButton}}
             <div class="legend">
               <span><i style="background:var(--c-male)"></i>{{male}}</span>
               <span><i style="background:var(--c-female)"></i>{{female}}</span>
@@ -843,6 +1085,23 @@ public final class ChartPage {
               document.getElementById('zo').onclick = function(){ zoom(z/1.25, true); };
               document.getElementById('zf').onclick = fit;
               document.getElementById('pr').onclick = function(){ window.print(); };
+              // Baroque: the title plaque slips away while scrolling down, and returns on the way back up.
+              if (document.body.classList.contains('ornate')) {
+                var lastTop = 0, armed = false;
+                setTimeout(function(){ lastTop = wrap.scrollTop; armed = true; }, 400);
+                wrap.addEventListener('scroll', function(){
+                  if (!armed) return;
+                  var t = wrap.scrollTop, d = t - lastTop;
+                  if (Math.abs(d) < 12 && t > 40) return;
+                  document.body.classList.toggle('scrolled', d > 0 && t > 40);
+                  lastTop = t;
+                }, {passive: true});
+              }
+              var hd = document.getElementById('hd');
+              if (hd) hd.onclick = function(){
+                var bare = document.body.classList.toggle('bare');
+                hd.setAttribute('aria-pressed', bare ? 'true' : 'false');
+              };
               zoom(Math.max(0.55, Math.min(1, (wrap.clientWidth-16)/W)));
               var rootCard = svg.querySelector('.card.root');
               if (rootCard) center(rootCard, false);
