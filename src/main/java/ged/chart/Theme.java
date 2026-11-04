@@ -8,7 +8,10 @@ import java.util.Map;
 /// is the original warm paper look (light only); `modern` adds initials
 /// avatars, large flags, ages, record ids, and a dark palette; `baroque`
 /// is a 19th-century engraved look on parchment, with framed cards,
-/// scrollwork and a bordered page (see [Ornaments]), and a candlelit dark.
+/// scrollwork and a bordered page (see [Ornaments]), and a candlelit dark;
+/// `sephirot` draws the tree as an old engraved plate, ivory on black, with
+/// round medallions joined by channels, ancestors rising to the top (see
+/// [Sephirot]).
 ///
 /// Palettes map colour keys (used by [ChartPage] marks and the HTML page
 /// chrome) to hex colours. In HTML each key becomes a CSS variable
@@ -31,9 +34,14 @@ public record Theme(String name, double cardW, double cardH, double stack, doubl
 
     public boolean hasDark() { return dark != null; }
     public boolean modern() { return name.equals("modern"); }
-    public boolean ornate() { return name.equals("baroque"); }
-    /// Timelines need the tinted palette and id/age styles classic lacks.
-    public boolean hasTimeline() { return light.containsKey("maleBg") && fonts.containsKey("id"); }
+    /// A decorated page: bordered, with a floating title plaque and controls.
+    public boolean ornate() { return baroque() || sephirot(); }
+    public boolean baroque() { return name.equals("baroque"); }
+    public boolean sephirot() { return name.equals("sephirot"); }
+    /// Opens dark (the HTML can still switch; `--light` for pictures).
+    public boolean startsDark() { return sephirot(); }
+    /// Timelines need the tinted palette and id/age styles classic lacks; sephirot is a tree only.
+    public boolean hasTimeline() { return light.containsKey("maleBg") && fonts.containsKey("id") && !sephirot(); }
     public double pitch() { return cardW + colGap; }
 
     public Font font(String style) {
@@ -51,7 +59,8 @@ public record Theme(String name, double cardW, double cardH, double stack, doubl
             case "classic" -> CLASSIC;
             case "modern" -> MODERN;
             case "baroque" -> BAROQUE;
-            default -> throw new IllegalArgumentException("unknown theme '" + name + "' (use modern, classic or baroque)");
+            case "sephirot" -> SEPHIROT;
+            default -> throw new IllegalArgumentException("unknown theme '" + name + "' (use modern, classic, baroque or sephirot)");
         };
     }
 
@@ -180,4 +189,49 @@ public record Theme(String name, double cardW, double cardH, double stack, doubl
                     Map.entry("male", "#9fb6d3"), Map.entry("female", "#dba3ac"), Map.entry("unknown", "#c4b49a"),
                     Map.entry("maleBg", "#2a2d2c"), Map.entry("femaleBg", "#3a2522"), Map.entry("unknownBg", "#2f281d"),
                     Map.entry("flagLine", "#efe3c8")));
+
+    // ---- sephirot ----------------------------------------------------------
+
+    private static Font caps(int w, double size, double tracking, String color) {
+        return new Font(OLD_CSS, OLD, w, size, tracking, true, color);
+    }
+
+    /// Card geometry is unused by [Sephirot] (medallions have their own), but kept sane.
+    public static final Theme SEPHIROT = new Theme("sephirot", 144, 144, 0, 44, 0, 0, 0,
+            Map.ofEntries(
+                    Map.entry("title", caps(600, 25, 0.2, "ink")),
+                    Map.entry("sub", old(400, 12.5, "pl", true)),
+                    Map.entry("col", caps(600, 9, 0.2, "col")),
+                    Map.entry("cap", caps(600, 9, 0.2, "col")),
+                    Map.entry("ring", caps(500, 8, 0.14, "ring")),
+                    Map.entry("nm", old(600, 13.5, "ink", false)),
+                    Map.entry("yr", old(400, 12, "yr", true)),
+                    Map.entry("age", old(400, 10.5, "age", true)),
+                    Map.entry("pl", old(400, 10.5, "pl", true)),
+                    Map.entry("tag", caps(600, 8, 0.12, "tag")),
+                    Map.entry("id", caps(600, 7.5, 0.12, "idText"))),
+            Map.ofEntries(
+                    Map.entry("paper", "#efe6d2"), Map.entry("ink", "#1c1712"), Map.entry("muted", "#6e6252"),
+                    Map.entry("line", "#d6cab0"), Map.entry("panel", "#f6efdf"), Map.entry("btn", "#f6efdf"),
+                    Map.entry("btnLine", "#a8987a"), Map.entry("btnHover", "#e9dfc8"), Map.entry("href", "#7a3b22"),
+                    Map.entry("card", "#f6efdf"), Map.entry("cardLine", "#2a231b"), Map.entry("hover", "#7a3b22"),
+                    Map.entry("rootFill", "#f3e6c8"), Map.entry("repeatFill", "#efe6d2"), Map.entry("accent", "#8a4a2a"),
+                    Map.entry("orn", "#3a3026"), Map.entry("link", "#2a231b"), Map.entry("col", "#2a231b"),
+                    Map.entry("ring", "#3a3026"), Map.entry("yr", "#2a231b"), Map.entry("age", "#5a4e40"),
+                    Map.entry("pl", "#5a4e40"), Map.entry("tag", "#8a4a2a"), Map.entry("idText", "#6e6252"),
+                    Map.entry("male", "#2f4a6b"), Map.entry("female", "#8b2e3f"), Map.entry("unknown", "#5a4e40"),
+                    Map.entry("maleBg", "#d9dcd2"), Map.entry("femaleBg", "#ecd6c8"), Map.entry("unknownBg", "#e4d8c0"),
+                    Map.entry("flagLine", "#1c1712")),
+            Map.ofEntries(
+                    Map.entry("paper", "#0b0a09"), Map.entry("ink", "#f1e7d2"), Map.entry("muted", "#a39780"),
+                    Map.entry("line", "#2a2620"), Map.entry("panel", "#12100e"), Map.entry("btn", "#15130f"),
+                    Map.entry("btnLine", "#4a4234"), Map.entry("btnHover", "#221e18"), Map.entry("href", "#e8b48e"),
+                    Map.entry("card", "#0e0c0b"), Map.entry("cardLine", "#eadfc6"), Map.entry("hover", "#e8b48e"),
+                    Map.entry("rootFill", "#1a140f"), Map.entry("repeatFill", "#0b0a09"), Map.entry("accent", "#e3a57c"),
+                    Map.entry("orn", "#d8cbb0"), Map.entry("link", "#e3d7bd"), Map.entry("col", "#eadfc6"),
+                    Map.entry("ring", "#e0d3b6"), Map.entry("yr", "#e6dbc3"), Map.entry("age", "#b3a68c"),
+                    Map.entry("pl", "#b3a68c"), Map.entry("tag", "#e3a57c"), Map.entry("idText", "#a39780"),
+                    Map.entry("male", "#a9c0dc"), Map.entry("female", "#e3aab4"), Map.entry("unknown", "#c9bca2"),
+                    Map.entry("maleBg", "#1d2229"), Map.entry("femaleBg", "#2a1b1e"), Map.entry("unknownBg", "#1f1b16"),
+                    Map.entry("flagLine", "#f1e7d2")));
 }

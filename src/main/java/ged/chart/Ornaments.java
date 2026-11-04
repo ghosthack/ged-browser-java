@@ -231,6 +231,77 @@ final class Ornaments {
         }
     }
 
+    // ---- sephirot: engraved plate --------------------------------------------------
+
+    private static final double K = 0.5523;   // cubic Bézier handle for a quarter circle
+
+    /// A full circle as four cubic arcs.
+    static String circle(double cx, double cy, double r) {
+        double k = K * r;
+        return "M" + num(cx + r) + " " + num(cy)
+                + " C" + num(cx + r) + " " + num(cy + k) + " " + num(cx + k) + " " + num(cy + r) + " " + num(cx) + " " + num(cy + r)
+                + " C" + num(cx - k) + " " + num(cy + r) + " " + num(cx - r) + " " + num(cy + k) + " " + num(cx - r) + " " + num(cy)
+                + " C" + num(cx - r) + " " + num(cy - k) + " " + num(cx - k) + " " + num(cy - r) + " " + num(cx) + " " + num(cy - r)
+                + " C" + num(cx + k) + " " + num(cy - r) + " " + num(cx + r) + " " + num(cy - k) + " " + num(cx + r) + " " + num(cy) + " Z";
+    }
+
+    /// The lower half of a circle, closed along its diameter.
+    static String lowerHalf(double cx, double cy, double r) {
+        double k = K * r;
+        return "M" + num(cx + r) + " " + num(cy)
+                + " C" + num(cx + r) + " " + num(cy + k) + " " + num(cx + k) + " " + num(cy + r) + " " + num(cx) + " " + num(cy + r)
+                + " C" + num(cx - k) + " " + num(cy + r) + " " + num(cx - r) + " " + num(cy + k) + " " + num(cx - r) + " " + num(cy) + " Z";
+    }
+
+    /// A short line from radius `r1` to `r2` at `angle` (radians, clockwise from 3 o'clock) about (cx, cy).
+    static String spoke(double cx, double cy, double r1, double r2, double angle) {
+        double c = Math.cos(angle), s = Math.sin(angle);
+        return "M" + num(cx + r1 * c) + " " + num(cy + r1 * s) + " L" + num(cx + r2 * c) + " " + num(cy + r2 * s);
+    }
+
+    /// The old planetary signs for man and woman, ♂ (Mars) and ♀ (Venus), drawn as lines around a ring at (x, y).
+    static void sexSign(List<Mark> out, double x, double y, ged.model.Person.Sex sex, String color) {
+        double r = 3.6;
+        switch (sex) {
+            case MALE -> {
+                double cx = x - 1.2, cy = y + 1.2, d = r * 0.7071, tx = cx + d + 5.2, ty = cy - d - 5.2;
+                out.add(new Orn(circle(cx, cy, r), null, color, 1.1));
+                out.add(new Orn("M" + num(cx + d) + " " + num(cy - d) + " L" + num(tx) + " " + num(ty)
+                        + " M" + num(tx - 3.6) + " " + num(ty) + " L" + num(tx) + " " + num(ty) + " L" + num(tx) + " " + num(ty + 3.6),
+                        null, color, 1.1));
+            }
+            case FEMALE -> {
+                double cy = y - 2.2;
+                out.add(new Orn(circle(x, cy, r), null, color, 1.1));
+                out.add(new Orn("M" + num(x) + " " + num(cy + r) + " L" + num(x) + " " + num(cy + r + 6.4)
+                        + " M" + num(x - 2.8) + " " + num(cy + r + 3.2) + " L" + num(x + 2.8) + " " + num(cy + r + 3.2),
+                        null, color, 1.1));
+            }
+            default -> out.add(new Orn(circle(x, y, 2.4), null, color, 1.1));
+        }
+    }
+
+    /// The emblem on the plate's title: a disc, its lower half dark, between two fine rules.
+    static void horizon(List<Mark> out, double cx, double cy, double r, double rule, String color, String dark) {
+        out.add(new Orn(lowerHalf(cx, cy, r), dark, null, 0));
+        out.add(new Orn(circle(cx, cy, r), null, color, 1.1));
+        out.add(new Orn("M" + num(cx - r) + " " + num(cy) + " L" + num(cx + r) + " " + num(cy), null, color, 0.6));
+        if (rule > 0) {
+            for (int s : new int[] {1, -1}) {
+                out.add(new Orn("M" + num(cx + s * (r + 6)) + " " + num(cy) + " L" + num(cx + s * (r + 6 + rule)) + " " + num(cy), null, color, 0.7));
+                out.add(new Dot(cx + s * (r + 10 + rule), cy, 1.3, color));
+            }
+        }
+    }
+
+    /// A plain double rule just inside a (w × h) page: the edge of an engraved plate.
+    static List<Mark> plateEdge(double w, double h, String color) {
+        var out = new ArrayList<Mark>();
+        out.add(new Orn(frame(8, 8, w - 16, h - 16, 0), null, color, 1.4));
+        out.add(new Orn(frame(12.5, 12.5, w - 25, h - 25, 0), null, color, 0.5));
+        return out;
+    }
+
     /// A double-ruled page border with arabesques in the corners, inside a (w × h) page.
     static List<Mark> border(double w, double h, String color) {
         var out = new ArrayList<Mark>();

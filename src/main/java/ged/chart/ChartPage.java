@@ -68,7 +68,7 @@ public final class ChartPage {
     // ---- marks ---------------------------------------------------------------
 
     /// Something drawn on a card, in card coordinates. Colours are palette keys.
-    sealed interface Mark permits Box, Bar, Dot, Txt, FlagMark, Orn {}
+    sealed interface Mark permits Box, Bar, Dot, Txt, FlagMark, Orn, Ring {}
 
     /// Rounded rectangle; `cls` tags the card background for hover/selection.
     record Box(double x, double y, double w, double h, double r, String fill, String stroke, double strokeW,
@@ -100,8 +100,14 @@ public final class ChartPage {
         Orn(String d, String fill, String stroke, double strokeW) { this(d, fill, stroke, strokeW, false, null); }
     }
 
+    /// Text set around a circle about (cx, cy), its baseline on radius `r`,
+    /// centred on the top (reading clockwise, letters standing outwards) or
+    /// on the bottom (reading the other way, letters pointing inwards).
+    record Ring(String text, String style, double cx, double cy, double r, boolean top) implements Mark {}
+
     List<Mark> marks(Card c) {
         if (c.span() != null) return timelineMarks(c);
+        if (theme.sephirot()) return sephirotMarks(c);
         if (theme.ornate()) return baroqueMarks(c);
         return theme.modern() ? modernMarks(c) : classicMarks(c);
     }
@@ -343,6 +349,103 @@ public final class ChartPage {
         return out;
     }
 
+    /// A medallion on an engraved plate: a double ring carrying the birth
+    /// (top) and death (bottom) in small capitals, the name, years and age
+    /// inside, the flag above them, the relation to the root as a caption
+    /// over it and the old sign for man or woman beside it. The root is
+    /// crowned with rays.
+    private List<Mark> sephirotMarks(Card c) {
+        double R = Sephirot.R, cx = R, cy = R, band = R - 15, inner = band - 3.5;
+        var p = c.person();
+        boolean root = c.kind() == Kind.ROOT, repeat = c.kind() == Kind.REPEAT;
+        var out = new ArrayList<Mark>();
+
+        if (root) {
+            for (int i = 0; i < 48; i++) {
+                out.add(new Orn(Ornaments.spoke(cx, cy, R + 4, R + (i % 2 == 0 ? 12 : 8), i * Math.PI / 24), null, "accent", 0.8));
+            }
+        }
+        out.add(new Orn(Ornaments.circle(cx, cy, R), root ? "rootFill" : repeat ? "repeatFill" : "card",
+                root ? "accent" : "cardLine", root ? 1.8 : 1.2, repeat, "bg"));
+        out.add(new Orn(Ornaments.circle(cx, cy, R - 3), null, "orn", 0.5));
+        out.add(new Orn(Ornaments.circle(cx, cy, band), null, "orn", 0.9));
+        out.add(new Orn(Ornaments.circle(cx, cy, inner), null, "orn", 0.5));
+        for (double a : new double[] {0, Math.PI}) {
+            out.add(new Orn(Ornaments.spoke(cx, cy, band, R - 3, a), null, "orn", 0.8));
+        }
+
+        // Birth around the top of the ring, death around the bottom.
+        var rf = theme.font("ring");
+        double room = (band + R - 3) / 2 * 2.5;
+        var top = repeat ? l.repeat().replaceFirst("^\\P{L}+", "").toUpperCase(Locale.ROOT)
+                : ringLine("* ", p.event("BIRT").or(() -> p.event("CHR")).or(() -> p.event("BAPM")), room, rf);
+        var bottom = repeat ? "" : ringLine("† ", p.event("DEAT").or(() -> p.event("BURI")), room, rf);
+        if (bottom.isEmpty() && p.isDeceased() && !repeat) bottom = "†";
+        if (!top.isEmpty()) out.add(new Ring(fit(top, room, rf), "ring", cx, cy, band + 3.3, true));
+        if (!bottom.isEmpty()) out.add(new Ring(fit(bottom, room, rf), "ring", cx, cy, R - 4.6, false));
+
+        // Caption over the medallion, and the sign for man or woman beside it.
+        var caption = relation(c);
+        if (!caption.isEmpty()) {
+            var text = caption.toUpperCase(Locale.ROOT);
+            var cf = theme.font("cap");
+            double tw = Math.min(150, measure(text, cf)) + 14;
+            out.add(new Box(cx - tw / 2, -21, tw, 16, 0, "paper", null, 0, false, null));   // channels pass behind it
+            out.add(new Txt(List.of(new Run(text, "cap", null)), cx, -10, "middle", squeeze(text, 150, theme.font("cap"))));
+        }
+        double sa = -0.7, sr = R + (root ? 22 : 13);
+        Ornaments.sexSign(out, cx + sr * Math.cos(sa), cy + sr * Math.sin(sa), p.sex(), sexKey(p));
+
+        // Inside: flag, name, years, age, record id.
+        var flag = repeat ? Optional.<Flags.Flag>empty() : Flags.forPlace(birthPlace(p));
+        flag.ifPresent(f -> out.add(new FlagMark(f, cx - 8, cy - 44, 16, 10.7)));
+        var nm = theme.font("nm");
+        var names = nameLines(p, 98, nm);
+        double y = names.size() > 1 ? cy - 8 : cy + 1;
+        for (var line : names) {
+            out.add(new Txt(List.of(new Run(line, "nm", null)), cx, y, "middle", squeeze(line, 98, nm)));
+            y += 15.5;
+        }
+        var years = years(p).replace(" – ", "–");
+        if (!years.isEmpty()) out.add(new Txt(List.of(new Run(fit(years, 92, theme.font("yr")), "yr", null)), cx, cy + 23, "middle", 0));
+        var age = age(p);
+        if (!age.isEmpty()) out.add(new Txt(List.of(new Run(fit(age, 84, theme.font("age")), "age", null)), cx, cy + 35.5, "middle", 0));
+        out.add(new Txt(List.of(new Run(p.key().toUpperCase(Locale.ROOT), "id", null)), cx, cy + 47, "middle", 0));
+        return out;
+    }
+
+    /// `* 12 JUN 1850 · GENOVA, ITALIA`, shortened until it fits `room`.
+    private String ringLine(String sign, Optional<Event> e, double room, Theme.Font f) {
+        if (e.isEmpty()) return "";
+        var date = l.fullDate(e.get().date());
+        var year = l.year(e.get().date());
+        var parts = List.of(e.get().place().split("\\s*,\\s*")).stream().filter(x -> !x.isBlank()).toList();
+        var full = String.join(", ", parts);
+        var ends = parts.size() > 2 ? parts.getFirst() + ", " + parts.getLast() : full;
+        var first = parts.isEmpty() ? "" : parts.getFirst();
+        String last = "";
+        for (var cand : List.of(join(" · ", date, full), join(" · ", date, ends), join(" · ", date, first),
+                join(" · ", year, ends), join(" · ", year, first), date, year)) {
+            if (cand.isEmpty()) continue;
+            last = (sign + cand).toUpperCase(Locale.ROOT);
+            if (measure(last, f) <= room) return last;
+        }
+        return last;
+    }
+
+    private double rootY = Double.NaN;
+
+    /// `Grandmother`, `Son`, `Wife`: how the person on card `c` is related to the root.
+    private String relation(Card c) {
+        if (c.kind() == Kind.ROOT) return "";
+        if (c.kind() == Kind.SPOUSE) return l.spouse(c.person().sex());
+        if (Double.isNaN(rootY)) {
+            rootY = chart.cards().stream().filter(k -> k.kind() == Kind.ROOT).mapToDouble(Card::y).findFirst().orElse(0);
+        }
+        int gen = (int) Math.round((rootY - c.y()) / Sephirot.ROW);
+        return gen == 0 ? "" : l.relation(Math.abs(gen), gen > 0, c.person().sex());
+    }
+
     private String initials(Person p) {
         var nm = p.name();
         var a = firstLetter(nm.given());
@@ -528,9 +631,28 @@ public final class ChartPage {
     List<Mark> pageMarks(boolean heading) {
         var out = new ArrayList<Mark>();
         double w = pageW(heading);
-        if (theme.ornate()) out.addAll(Ornaments.border(w, pageH(heading), "orn"));
+        if (theme.sephirot()) out.addAll(Ornaments.plateEdge(w, pageH(heading), "orn"));
+        else if (theme.ornate()) out.addAll(Ornaments.border(w, pageH(heading), "orn"));
         if (!heading) return out;
-        if (theme.ornate()) {
+        if (theme.sephirot()) {
+            // The title split either side of a half-dark disc, as on the old plates.
+            double cx = w / 2, top = pad(), ty = top + 50;
+            var tf = theme.font("title");
+            var words = title.toUpperCase(Locale.ROOT).split("\\s+");
+            if (words.length > 1) {
+                int half = (words.length + 1) / 2;
+                var left = String.join(" ", List.of(words).subList(0, half));
+                var right = String.join(" ", List.of(words).subList(half, words.length));
+                double room = w / 2 - 70;
+                Ornaments.horizon(out, cx, ty - 8.5, 15, 0, "orn", "orn");
+                out.add(new Txt(List.of(new Run(left, "title", null)), cx - 26, ty, "end", squeeze(left, room, tf)));
+                out.add(new Txt(List.of(new Run(right, "title", null)), cx + 26, ty, "start", squeeze(right, room, tf)));
+            } else {
+                out.add(new Txt(List.of(new Run(words[0], "title", null)), cx, ty, "middle", squeeze(words[0], w - 120, tf)));
+            }
+            Ornaments.horizon(out, cx, top + 70, 3, 90, "orn", "orn");
+            out.add(new Txt(List.of(new Run(subtitle(), "sub", null)), cx, top + 94, "middle", 0));
+        } else if (theme.ornate()) {
             double cx = w / 2, top = pad();
             out.add(new Txt(List.of(new Run(title, "title", null)), cx, top + 50, "middle", squeeze(title, w - 120, theme.font("title"))));
             Ornaments.flourish(out, cx, top + 70, "orn");
@@ -545,7 +667,7 @@ public final class ChartPage {
     /// Decoration in chart coordinates: swashes beside the column headings.
     List<Mark> chartMarks() {
         var out = new ArrayList<Mark>();
-        if (!theme.ornate() || chart.timeline()) return out;   // a year axis is too dense for swashes
+        if (!theme.baroque() || chart.timeline()) return out;   // a year axis is too dense for swashes
         var f = theme.font("col");
         for (var c : chart.columns()) {
             var label = f.upper() ? c.label().toUpperCase(Locale.ROOT) : c.label();
@@ -557,6 +679,7 @@ public final class ChartPage {
     /// Baroque tree: leaves along the connectors, drawn over the lines.
     List<Mark> linkMarks() {
         var out = new ArrayList<Mark>();
+        if (theme.sephirot()) return channels();
         if (!theme.ornate() || chart.timeline()) return out;
         var seen = new java.util.HashSet<String>();
         for (var k : chart.links()) {
@@ -564,6 +687,66 @@ public final class ChartPage {
             Ornaments.vine(out, k.x1(), k.y1(), k.x2(), k.y2(), r, mx, seen, "orn");
         }
         return out;
+    }
+
+    /// Whether links and ties are plain lines (else [#linkMarks] draws them).
+    boolean plainLinks() { return !theme.sephirot(); }
+
+    /// Sephirot: every link and tie as a double-ruled channel; a marriage's
+    /// channel carries its year (and place, when there's room) inside it.
+    private List<Mark> channels() {
+        var out = new ArrayList<Mark>();
+        for (var k : chart.links()) channel(out, k, 3.2);
+        // A small knot wherever channels meet away from a medallion.
+        var ends = new java.util.HashMap<String, double[]>();
+        var counts = new java.util.HashMap<String, Integer>();
+        for (var k : chart.links()) {
+            for (var pt : List.of(new double[] {k.x1(), k.y1()}, new double[] {k.x2(), k.y2()})) {
+                var key = Math.round(pt[0]) + ":" + Math.round(pt[1]);
+                ends.put(key, pt);
+                counts.merge(key, 1, Integer::sum);
+            }
+        }
+        counts.forEach((key, n) -> {
+            if (n < 2) return;
+            var pt = ends.get(key);
+            out.add(new Orn(Ornaments.circle(pt[0], pt[1], 4.6), "paper", "link", 0.9));
+            out.add(new Dot(pt[0], pt[1], 1.5, "link"));
+        });
+        var byCentre = new java.util.HashMap<String, Card>();
+        for (var c : chart.cards()) byCentre.put(Math.round(c.x() + Sephirot.R) + ":" + Math.round(c.y() + Sephirot.R), c);
+        var tf = theme.font("tag");
+        for (var t : chart.ties()) {
+            channel(out, t, 7);
+            var a = byCentre.get(Math.round(t.x1() - Sephirot.R - 2) + ":" + Math.round(t.y1()));
+            var b = byCentre.get(Math.round(t.x2() + Sephirot.R + 2) + ":" + Math.round(t.y2()));
+            if (a == null || b == null) continue;
+            var fam = b.family().or(a::family).or(() -> g.familiesAsSpouse(a.person()).stream()
+                    .filter(f -> f.partnerOf(a.person().id()).filter(b.person().id()::equals).isPresent()).findFirst());
+            if (fam.isEmpty()) continue;
+            double room = t.x2() - t.x1() - 12;
+            var tag = marriageTag(fam.get()).toUpperCase(Locale.ROOT);
+            var place = fam.get().event("MARR").map(Event::place).orElse("").split("\\s*,\\s*")[0].toUpperCase(Locale.ROOT);
+            var year = tag.replaceFirst(" · .*", "");
+            String text = null;
+            for (var cand : List.of(place.isBlank() ? tag : tag + " · " + place, tag, year)) {
+                if (measure(cand, tf) <= room) { text = cand; break; }
+            }
+            if (text == null) continue;
+            out.add(new Txt(List.of(new Run(text, "tag", null)), (t.x1() + t.x2()) / 2, t.y1() + 2.9, "middle", 0));
+        }
+        return out;
+    }
+
+    /// A band `half` either side of the line k: paper inside, a fine rule along each side.
+    private static void channel(List<Mark> out, Link k, double half) {
+        double len = Math.hypot(k.x2() - k.x1(), k.y2() - k.y1());
+        if (len < 1) return;
+        double nx = -(k.y2() - k.y1()) / len * half, ny = (k.x2() - k.x1()) / len * half;
+        String a1 = n(k.x1() + nx) + " " + n(k.y1() + ny), a2 = n(k.x2() + nx) + " " + n(k.y2() + ny);
+        String b1 = n(k.x1() - nx) + " " + n(k.y1() - ny), b2 = n(k.x2() - nx) + " " + n(k.y2() - ny);
+        out.add(new Orn("M" + a1 + " L" + a2 + " L" + b2 + " L" + b1 + " Z", "paper", null, 0));
+        out.add(new Orn("M" + a1 + " L" + a2 + " M" + b1 + " L" + b2, null, "link", 0.9));
     }
 
     // ---- SVG -----------------------------------------------------------------
@@ -613,13 +796,13 @@ public final class ChartPage {
                     .append("\" y2=\"").append(n(gd.y2())).append("\" style=\"stroke:").append(color(gd.today() ? "accent" : "line", mode))
                     .append(gd.today() ? ";stroke-width:1.5;stroke-dasharray:5 4" : ";stroke-width:1").append("\"/>\n");
         }
-        for (var t : chart.ties()) {
+        for (var t : plainLinks() ? chart.ties() : List.<Link>of()) {
             sb.append("<line x1=\"").append(n(t.x1())).append("\" y1=\"").append(n(t.y1())).append("\" x2=\"").append(n(t.x2()))
                     .append("\" y2=\"").append(n(t.y2())).append("\" style=\"stroke:").append(color("accent", mode))
                     .append(";stroke-width:2;stroke-dasharray:2 2\"/>\n");
         }
         var linkStyle = "fill:none;stroke:" + color("link", mode) + ";stroke-width:" + (theme.ornate() ? "1.2" : "1.6");
-        for (var lk : chart.links()) sb.append("<path d=\"").append(elbow(lk)).append("\" style=\"").append(linkStyle).append("\"/>\n");
+        for (var lk : plainLinks() ? chart.links() : List.<Link>of()) sb.append("<path d=\"").append(elbow(lk)).append("\" style=\"").append(linkStyle).append("\"/>\n");
         for (var m : linkMarks()) paint(sb, m, mode);
         for (var c : chart.cards()) card(sb, c, mode);
         if (shifted) sb.append("</g>\n");
@@ -636,6 +819,8 @@ public final class ChartPage {
         for (var m : marks(c)) paint(sb, m, mode);
         sb.append("</g>\n");
     }
+
+    private int ringIds;
 
     private void paint(StringBuilder sb, Mark m, Colors mode) {
         switch (m) {
@@ -671,7 +856,19 @@ public final class ChartPage {
             }
             sb.append("\"/>");
         }
-        case Txt t -> {
+            case Ring r -> {
+                if (r.text().isEmpty()) break;
+                var id = "ring" + (++ringIds);
+                double cx = r.cx(), cy = r.cy(), rr = r.r();
+                // Top: left to right over the top; bottom: left to right under the bottom.
+                sb.append("<path id=\"").append(id).append("\" d=\"M").append(n(cx - rr)).append(' ').append(n(cy))
+                        .append("A").append(n(rr)).append(' ').append(n(rr)).append(" 0 0 ").append(r.top() ? 1 : 0).append(' ')
+                        .append(n(cx + rr)).append(' ').append(n(cy)).append("\" style=\"fill:none\"/>");
+                sb.append("<text style=\"").append(fontStyle(r.style(), null, mode))
+                        .append("\"><textPath href=\"#").append(id).append("\" startOffset=\"50%\" text-anchor=\"middle\">")
+                        .append(esc(r.text())).append("</textPath></text>");
+            }
+            case Txt t -> {
                 sb.append("<text x=\"").append(n(t.x())).append("\" y=\"").append(n(t.y())).append('"');
                 if (!t.anchor().equals("start")) sb.append(" text-anchor=\"").append(t.anchor()).append('"');
                 if (t.squeezeTo() > 0) sb.append(" textLength=\"").append(n(t.squeezeTo())).append("\" lengthAdjust=\"spacingAndGlyphs\"");
@@ -757,13 +954,15 @@ public final class ChartPage {
                 .replace("{{lang}}", l.code())
                 .replace("{{scheme}}", theme.hasDark() ? "light dark" : "light")
                 .replace("{{vars}}", cssVars())
-                .replace("{{themeCss}}", theme.ornate() ? ORNATE_CSS.replace("{{old}}", Theme.OLD_CSS).replace("{{script}}", Theme.SCRIPT_CSS) : "")
+                .replace("{{themeCss}}", theme.ornate()
+                        ? (ORNATE_CSS + (theme.sephirot() ? SEPHIROT_CSS : "")).replace("{{old}}", Theme.OLD_CSS).replace("{{script}}", Theme.SCRIPT_CSS)
+                        : "")
                 .replace("{{titleOrnament}}", theme.ornate() ? titleOrnament() : "")
-                .replace("{{deco}}", theme.ornate() ? cornerDeco() : "")
-                .replace("{{bodyClass}}", theme.ornate() ? " class=\"ornate\"" : "")
+                .replace("{{deco}}", theme.baroque() ? cornerDeco() : "")
+                .replace("{{bodyClass}}", theme.sephirot() ? " class=\"ornate sephirot\"" : theme.ornate() ? " class=\"ornate\"" : "")
                 .replace("{{hideButton}}", theme.ornate()
                         ? "<button id=\"hd\" aria-pressed=\"false\" aria-label=\"" + esc(l.hideControls()) + "\" title=\""
-                          + esc(l.hideControls()) + "\">❦\uFE0E</button>" : "")
+                          + esc(l.hideControls()) + "\">" + (theme.sephirot() ? "☉" : "❦") + "\uFE0E</button>" : "")
                 .replace("{{toolsHint}}", theme.ornate() ? "<div class=\"thint\">" + esc(l.hint()) + "</div>" : "")
                 .replace("{{start}}", startDark ? " data-theme=\"dark\"" : "")
                 .replace("{{title}}", esc(title))
@@ -916,7 +1115,8 @@ public final class ChartPage {
     /// The flourish under the HTML page's title.
     private String titleOrnament() {
         var marks = new ArrayList<Mark>();
-        Ornaments.flourish(marks, 120, 10, "orn");
+        if (theme.sephirot()) Ornaments.horizon(marks, 120, 10, 6, 70, "orn", "orn");
+        else Ornaments.flourish(marks, 120, 10, "orn");
         var sb = new StringBuilder("<svg class=\"orn\" viewBox=\"0 0 240 20\" width=\"240\" height=\"20\" aria-hidden=\"true\">");
         for (var m : marks) paint(sb, m, Colors.VARS);
         return sb.append("</svg>").toString();
@@ -972,6 +1172,16 @@ public final class ChartPage {
                 .plate{box-shadow:none;margin:0 auto 8px}
                 #hd{display:none!important}
               }
+            """;
+
+    /// Sephirot: an engraved plate, so square panels and tracked capitals instead of script.
+    private static final String SEPHIROT_CSS = """
+              h1{font:600 24px/1.25 {{old}};letter-spacing:.2em;text-transform:uppercase}
+              .plate,.tools,aside,#hd{border-radius:0}
+              .plate,.tools{box-shadow:0 0 0 3px var(--c-panel),0 0 0 4px var(--c-orn),0 12px 30px rgba(0,0,0,.35)}
+              button{font-style:normal;letter-spacing:.06em}
+              aside h3{font-style:normal;letter-spacing:.2em}
+              @media (max-width:900px){h1{font-size:19px}}
             """;
 
     private static final String PAGE = """

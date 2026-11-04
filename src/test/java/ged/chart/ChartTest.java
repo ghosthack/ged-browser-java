@@ -376,6 +376,95 @@ class ChartTest {
         assertTrue(Theme.BAROQUE.hasTimeline() && !Theme.CLASSIC.hasTimeline());
     }
 
+    // ---- sephirot ----------------------------------------------------------
+
+    @Test
+    void sephirotRaisesAncestorsAboveTheRootInTriangles() {
+        var c = Sephirot.build(g, g.person("I9").orElseThrow(), new Layout.Spec(3, 0, true, Labels.EN, Theme.SEPHIROT));
+        var root = card(c, "I9");
+        var luca = card(c, "I7");
+        var sofia = card(c, "I8");
+        assertEquals(root.y() - Sephirot.ROW, luca.y(), 1e-9, "parents one row up");
+        assertEquals(luca.y(), sofia.y(), 1e-9);
+        assertEquals((luca.x() + sofia.x()) / 2, root.x(), 1e-9, "child centred under its parents");
+        assertEquals(3, c.up());
+        assertEquals(2, keys(c, Kind.REPEAT).size(), "Giovanni and Lucia again, through Anna");
+        assertEquals(5, c.ties().size(), "one channel per pair of parents");
+        for (var t : c.ties()) assertEquals(t.y1(), t.y2(), 1e-9);
+        for (var a : c.cards()) {
+            for (var b : c.cards()) {
+                if (a != b && Math.abs(a.y() - b.y()) < 1) assertTrue(Math.abs(a.x() - b.x()) >= Sephirot.D + Sephirot.GAP - 1e-6, a + " / " + b);
+            }
+        }
+        // Channels stop at the medallions' rims.
+        var centres = c.cards().stream().map(k -> new double[] {k.x() + Sephirot.R, k.y() + Sephirot.R}).toList();
+        for (var k : c.links()) {
+            for (var end : List.of(new double[] {k.x1(), k.y1()}, new double[] {k.x2(), k.y2()})) {
+                assertTrue(centres.stream().anyMatch(o -> Math.abs(Math.hypot(end[0] - o[0], end[1] - o[1]) - Sephirot.R - 2) < 1e-6));
+            }
+        }
+    }
+
+    @Test
+    void sephirotHangsDescendantsBelowWithPartnersBeside() {
+        var c = Sephirot.build(g, g.person("I1").orElseThrow(), new Layout.Spec(0, 9, true, Labels.EN, Theme.SEPHIROT));
+        var root = card(c, "I1");
+        assertEquals(root.y(), card(c, "I2").y(), 1e-9, "wife beside him");
+        assertEquals(root.y() + Sephirot.ROW, card(c, "I3").y(), 1e-9, "children a row down");
+        assertEquals(root.y() + 3 * Sephirot.ROW, card(c, "I9").y(), 1e-9);
+        assertEquals(List.of("I8"), keys(c, Kind.REPEAT), "the cousin bride once in full, then repeated");
+        assertEquals(3, c.down());
+    }
+
+    @Test
+    void sephirotMedallionsCarryLifeAroundTheRing() throws Exception {
+        var c = Sephirot.build(g, g.person("I9").orElseThrow(), new Layout.Spec(3, 0, true, Labels.EN, Theme.SEPHIROT));
+        var page = new ChartPage(g, c, Labels.EN, "The Rossi family", false, LocalDate.of(2026, 11, 3));
+        var marco = page.marks(card(c, "I3"));
+        var rings = marco.stream().filter(m -> m instanceof ChartPage.Ring).map(m -> (ChartPage.Ring) m).toList();
+        assertEquals(List.of("* 12 JUN 1850 · GENOVA"), rings.stream().map(ChartPage.Ring::text).toList());
+        assertTrue(rings.getFirst().top(), "shortened to the town to fit the ring");
+        assertTrue(marco.stream().anyMatch(m -> m instanceof ChartPage.Txt t && t.runs().getFirst().text().equals("GRANDFATHER")));
+        assertTrue(marco.stream().anyMatch(m -> m instanceof ChartPage.FlagMark), "born in Genova: Italy's flag");
+        var elena = page.marks(card(c, "I9"));
+        assertTrue(elena.stream().anyMatch(m -> m instanceof ChartPage.Ring r && !r.top() && r.text().equals("† 2 JAN 1990")));
+        assertTrue(elena.stream().filter(m -> m instanceof ChartPage.Orn o && "accent".equals(o.stroke())).count() > 40, "the root is crowned with rays");
+        assertTrue(elena.stream().noneMatch(m -> m instanceof ChartPage.Txt t && t.y() < 0 && !t.runs().getFirst().text().isEmpty()
+                && Character.isLetter(t.runs().getFirst().text().charAt(0))), "no caption on the root");
+        assertTrue(page.linkMarks().stream().anyMatch(m -> m instanceof ChartPage.Txt t && t.runs().getFirst().text().equals("∞ 1848")),
+                "Giovanni and Lucia's channel carries their marriage year");
+
+        var svg = page.svg(true, ChartPage.Colors.DARK);
+        assertTrue(svg.contains("<textPath href=\"#ring1\" startOffset=\"50%\""), "ring text set on a path");
+        assertTrue(svg.contains(">THE ROSSI</text>") && svg.contains(">FAMILY</text>"), "title split around the disc");
+        assertFalse(svg.contains("stroke-dasharray:2 2"), "channels instead of plain ties");
+        var html = page.html(true);
+        assertTrue(html.contains("class=\"ornate sephirot\"") && html.contains("☉") && !html.contains("class=\"cn tl\""));
+        System.setProperty("java.awt.headless", "true");
+        for (boolean dark : new boolean[] {false, true}) {
+            var img = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(new PngChart(page, dark).png(1)));
+            assertEquals(dark ? 0x0b0a09 : 0xefe6d2, img.getRGB(3, 3) & 0xffffff, "black plate / cream print");
+        }
+        assertTrue(Theme.SEPHIROT.startsDark() && !Theme.SEPHIROT.hasTimeline() && !Theme.SEPHIROT.baroque() && Theme.SEPHIROT.ornate());
+    }
+
+    @Test
+    void relationsNameEachGenerationBySex() {
+        var M = ged.model.Person.Sex.MALE;
+        var F = ged.model.Person.Sex.FEMALE;
+        var U = ged.model.Person.Sex.UNKNOWN;
+        assertEquals("Father", Labels.EN.relation(1, true, M));
+        assertEquals("Great-grandmother", Labels.EN.relation(3, true, F));
+        assertEquals("2nd great-grandmother", Labels.EN.relation(4, true, F));
+        assertEquals("Granddaughter", Labels.EN.relation(2, false, F));
+        assertEquals("Child", Labels.EN.relation(1, false, U));
+        assertEquals("Madre", Labels.ES.relation(1, true, F));
+        assertEquals("Bisabuelo", Labels.ES.relation(3, true, M));
+        assertEquals("Nieto/a", Labels.ES.relation(2, false, U));
+        assertEquals("Ancestro · gen. 6", Labels.ES.relation(6, true, M));
+        assertEquals("Esposa", Labels.ES.spouse(F));
+    }
+
     private static ChartPage modernOn(Genealogy g, LocalDate today) {
         var c = Layout.build(g, g.person("I9").orElseThrow(), new Layout.Spec(3, 0, true, Labels.EN, Theme.MODERN));
         return new ChartPage(g, c, Labels.EN, "t", false, today);

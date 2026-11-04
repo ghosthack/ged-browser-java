@@ -2,6 +2,7 @@ package ged.chart;
 
 import ged.model.Event;
 import ged.model.GedDate;
+import ged.model.Person;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -77,6 +78,35 @@ public enum Labels {
             default -> ordinal(n - 2) + " great-grand" + base;
         };
     }
+
+    /// One person's relation to the root: `n` generations up (ancestors) or down.
+    public String relation(int n, boolean up, Person.Sex sex) {
+        int s = sex == Person.Sex.MALE ? 0 : sex == Person.Sex.FEMALE ? 1 : 2;
+        if (this == ES) {
+            var stems = up ? List.of("padre|madre|progenitor", "abuel", "bisabuel", "tatarabuel", "trastatarabuel")
+                    : List.of("hij", "niet", "bisniet", "tataraniet", "trastataraniet");
+            if (n > stems.size()) return (up ? "Ancestro" : "Descendiente") + " · gen. " + n;
+            var stem = stems.get(n - 1);
+            if (stem.contains("|")) return cap(stem.split("\\|")[s]);
+            return cap(stem + List.of("o", "a", "o/a").get(s));
+        }
+        var base = up ? List.of("father", "mother", "parent") : List.of("son", "daughter", "child");
+        var word = n == 1 ? base.get(s)
+                : n == 2 ? "grand" + base.get(s)
+                : n == 3 ? "great-grand" + base.get(s)
+                : ordinal(n - 2) + " great-grand" + base.get(s);
+        return cap(word);
+    }
+
+    public String spouse(Person.Sex sex) {
+        return switch (sex) {
+            case MALE -> pick("Husband", "Esposo");
+            case FEMALE -> pick("Wife", "Esposa");
+            default -> pick("Spouse", "Cónyuge");
+        };
+    }
+
+    private static String cap(String s) { return s.isEmpty() ? s : Character.toUpperCase(s.charAt(0)) + s.substring(1); }
 
     private static String ordinal(int n) {
         var suffix = n % 100 >= 11 && n % 100 <= 13 ? "th" : switch (n % 10) {

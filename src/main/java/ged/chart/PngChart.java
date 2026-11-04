@@ -5,6 +5,7 @@ import ged.chart.ChartPage.Box;
 import ged.chart.ChartPage.Dot;
 import ged.chart.ChartPage.FlagMark;
 import ged.chart.ChartPage.Orn;
+import ged.chart.ChartPage.Ring;
 import ged.chart.ChartPage.Txt;
 import ged.chart.Layout.Kind;
 import ged.chart.Layout.Link;
@@ -120,11 +121,11 @@ public final class PngChart {
 
             g.setColor(color("accent"));
             g.setStroke(new BasicStroke(2f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10f, new float[] {2, 2}, 0));
-            for (var t : page.chart().ties()) g.draw(new Line2D.Double(t.x1(), t.y1(), t.x2(), t.y2()));
+            for (var t : page.plainLinks() ? page.chart().ties() : java.util.List.<Link>of()) g.draw(new Line2D.Double(t.x1(), t.y1(), t.x2(), t.y2()));
 
             g.setColor(color("link"));
             g.setStroke(new BasicStroke(theme.ornate() ? 1.2f : 1.6f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_ROUND));
-            for (var k : page.chart().links()) g.draw(elbow(k));
+            for (var k : page.plainLinks() ? page.chart().links() : java.util.List.<Link>of()) g.draw(elbow(k));
             for (var m : page.linkMarks()) paint(g, m);
 
             for (var c : page.chart().cards()) {
@@ -209,7 +210,39 @@ public final class PngChart {
                 }
             }
             case Txt t -> text(g, t);
+            case Ring r -> ring(g, r);
         }
+    }
+
+    /// Sets text around a circle one letter at a time, each turned to stand on (or hang from) the circle.
+    private void ring(Graphics2D g, Ring r) {
+        var f = font(r.style());
+        g.setFont(f);
+        g.setColor(color(theme.font(r.style()).color()));
+        var frc = g.getFontRenderContext();
+        var text = r.text();
+        var adv = new double[text.codePointCount(0, text.length())];
+        var chars = new String[adv.length];
+        double total = 0;
+        for (int i = 0, k = 0; i < text.length(); i = text.offsetByCodePoints(i, 1), k++) {
+            chars[k] = new String(Character.toChars(text.codePointAt(i)));
+            adv[k] = f.getStringBounds(chars[k], frc).getWidth();
+            total += adv[k];
+        }
+        double dir = r.top() ? 1 : -1;
+        // Top: from the left of 12 o'clock, clockwise. Bottom: from the left of 6 o'clock, anticlockwise.
+        double radius = r.r();
+        double theta = (r.top() ? -Math.PI / 2 : Math.PI / 2) - dir * total / 2 / radius;
+        var saved = g.getTransform();
+        for (int k = 0; k < adv.length; k++) {
+            double mid = theta + dir * adv[k] / 2 / radius;
+            g.setTransform(saved);
+            g.translate(r.cx() + radius * Math.cos(mid), r.cy() + radius * Math.sin(mid));
+            g.rotate(mid + dir * Math.PI / 2);
+            g.drawString(chars[k], (float) (-adv[k] / 2), 0f);
+            theta += dir * adv[k] / radius;
+        }
+        g.setTransform(saved);
     }
 
     /// Replays ornament path data: absolute M, L, C, Q and Z.

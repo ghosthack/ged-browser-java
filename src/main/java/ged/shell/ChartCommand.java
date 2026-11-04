@@ -4,6 +4,7 @@ import ged.chart.ChartPage;
 import ged.chart.Labels;
 import ged.chart.Layout;
 import ged.chart.PngChart;
+import ged.chart.Sephirot;
 import ged.chart.Theme;
 import ged.chart.Timeline;
 import ged.model.Genealogy;
@@ -32,9 +33,10 @@ final class ChartCommand implements Command {
             .value("t", "title", "TEXT", "heading (default: the person's name)")
             .value(null, "lang", "en|es", "language of labels and dates (default en)")
             .flag(null, "notes", "include notes in the click-for-details panel")
-            .value(null, "theme", "modern|classic|baroque", "look of the cards (default modern)")
+            .value(null, "theme", "modern|classic|baroque|sephirot", "look of the cards (default modern)")
             .flag(null, "arms", "baroque: bear the flag on a shield (men) or lozenge (women)")
-            .flag(null, "dark", "dark colours (HTML starts dark; viewers can switch); not for classic");
+            .flag(null, "dark", "dark colours (HTML starts dark; viewers can switch); not for classic")
+            .flag(null, "light", "light colours, for sephirot (which starts dark)");
 
     @Override public String name() { return "chart"; }
     @Override public String summary() { return "write a printable family-tree picture (HTML or SVG)"; }
@@ -43,7 +45,7 @@ final class ChartCommand implements Command {
     public String usage() {
         return """
                 chart [-a|-d] [--timeline] [-n N|--all] [-S] [-o FILE] [--scale N] [-t TITLE] [--lang en|es] [--notes]
-                      [--theme modern|classic|baroque] [--arms] [--dark] [PATH]
+                      [--theme modern|classic|baroque|sephirot] [--arms] [--dark|--light] [PATH]
 
                 Draws PATH (default: current person) with ancestors to the left and
                 descendants (with their partners) to the right, one column per
@@ -64,6 +66,12 @@ final class ChartCommand implements Command {
                 --arms to bear each flag on a shield for men or a lozenge for
                 women, as old heraldry did.
 
+                --theme sephirot draws the tree like an old engraved Tree of Life:
+                ivory on black, one round medallion per person with the birth and
+                death set around its ring, ancestors rising above the person and
+                descendants below, parents joined by a channel carrying their
+                marriage year. It starts dark; --light prints it black on cream.
+
                   chart                          4 generations each way → NAME-tree.html
                   chart -a -n 6 -o abuelos.html  6 generations of ancestors
                   chart --lang es ~              Spanish labels, home person
@@ -72,6 +80,7 @@ final class ChartCommand implements Command {
                   chart --dark -o arbol.png      a dark picture
                   chart --theme classic          the original look
                   chart --theme baroque -o arbol.png   an heirloom-style picture
+                  chart --theme sephirot -a -n 3  three generations as an engraved plate
 
                 --timeline draws everyone on a time axis instead: one bar per life,
                 from birth to death (or to today), so longer lives are longer bars,
@@ -101,7 +110,8 @@ final class ChartCommand implements Command {
         } catch (IllegalArgumentException e) {
             throw new CommandException(e.getMessage());
         }
-        boolean dark = o.has("dark");
+        if (o.has("dark") && o.has("light")) throw new CommandException("choose one of --dark and --light");
+        boolean dark = o.has("dark") || (theme.startsDark() && !o.has("light"));
         if (dark && !theme.hasDark()) throw new CommandException("the classic theme has no dark colours; drop --dark or --theme classic");
 
         var loc = ctx.nav().resolve(o.positionals().isEmpty() ? "" : o.positionals().getFirst()).location();
@@ -115,15 +125,16 @@ final class ChartCommand implements Command {
         var spec = new Layout.Spec(o.has("descendants") ? 0 : depth, o.has("ancestors") ? 0 : depth,
                 !o.has("no-spouses"), labels, theme);
         boolean timeline = o.has("timeline");
-        if (timeline && !theme.hasTimeline()) throw new CommandException("--timeline needs the modern or baroque look; drop --theme classic");
+        if (timeline && !theme.hasTimeline()) throw new CommandException("--timeline needs the modern or baroque look; drop --theme " + theme.name());
         Layout.Chart chart;
         try {
-            chart = timeline ? Timeline.build(ctx.g(), root, spec, LocalDate.now()) : Layout.build(ctx.g(), root, spec);
+            chart = timeline ? Timeline.build(ctx.g(), root, spec, LocalDate.now())
+                    : theme.sephirot() ? Sephirot.build(ctx.g(), root, spec) : Layout.build(ctx.g(), root, spec);
         } catch (IllegalArgumentException e) {
             throw new CommandException(e.getMessage());
         }
         var title = o.get("title").orElse(root.name().display());
-        if (o.has("arms") && !theme.ornate()) throw new CommandException("--arms goes with --theme baroque");
+        if (o.has("arms") && !theme.baroque()) throw new CommandException("--arms goes with --theme baroque");
         var page = new ChartPage(ctx.g(), chart, labels, title, o.has("notes"), LocalDate.now()).arms(o.has("arms"));
 
         var target = Path.of(o.get("output").orElse(slug(root) + (timeline ? "-timeline.html" : "-tree.html")));
