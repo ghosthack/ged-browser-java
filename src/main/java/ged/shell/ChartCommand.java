@@ -39,6 +39,8 @@ final class ChartCommand implements Command {
             .flag(null, "light", "light colours, for sephirot (which starts dark)");
 
     @Override public String name() { return "chart"; }
+    @Override public Options options() { return opts; }
+    @Override public boolean takesPaths() { return true; }
     @Override public String summary() { return "write a printable family-tree picture (HTML or SVG)"; }
 
     @Override
