@@ -155,8 +155,8 @@ public final class Timeline {
     /// A date as a fractional year (mid-month, mid-year when vague).
     static OptionalDouble year(GedDate d) {
         if (!d.hasYear()) return OptionalDouble.empty();
-        if (d.month() == 0) return OptionalDouble.of(d.year() + 0.5);
-        return OptionalDouble.of(d.year() + (d.month() - 1) / 12.0 + (d.day() > 0 ? (d.day() - 1) / 365.25 : 1 / 24.0));
+        if (d.month() == 0) return OptionalDouble.of(d.astronomicalYear() + 0.5);
+        return OptionalDouble.of(d.astronomicalYear() + (d.month() - 1) / 12.0 + (d.day() > 0 ? (d.day() - 1) / 365.25 : 1 / 24.0));
     }
 
     private static Optional<Double> boxed(OptionalDouble d) {
