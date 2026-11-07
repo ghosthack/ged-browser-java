@@ -587,7 +587,7 @@ public final class ChartPage {
 
     /// Whole years from `from` to `to`; month and day are used when both dates have them.
     private static int years(GedDate from, GedDate to) {
-        int y = to.year() - from.year();
+        int y = to.astronomicalYear() - from.astronomicalYear();
         if (from.month() > 0 && to.month() > 0
                 && (to.month() < from.month() || (to.month() == from.month() && from.day() > 0 && to.day() > 0 && to.day() < from.day()))) {
             y--;

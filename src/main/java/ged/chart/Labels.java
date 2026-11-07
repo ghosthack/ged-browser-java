@@ -116,7 +116,7 @@ public enum Labels {
             case AFTER -> pick("aft. ", "desp. de ");
             default -> "";
         };
-        return prefix + d.year();
+        return prefix + (d.year() < 0 ? -d.year() + pick(" BC", " a. C.") : Integer.toString(d.year()));
     }
 
     private static final List<String> MONTHS_EN =
