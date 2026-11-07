@@ -572,11 +572,10 @@ public final class ChartPage {
         return switch (d.qualifier()) {
             case EXACT, ABOUT -> new GedDate[] {d, d};
             case BETWEEN -> {
-                var parts = d.raw().toUpperCase(Locale.ROOT).replaceAll("@#D[^@]*@\\s*", "")
-                        .replaceFirst("^\\s*BET\\s+", "").split("\\s+AND\\s+");
-                if (parts.length != 2) yield null;
-                var lo = GedDate.parse(parts[0]);
-                var hi = GedDate.parse(parts[1]);
+                var ends = d.ends();
+                if (ends.size() != 2) yield null;
+                var lo = ends.get(0);
+                var hi = ends.get(1);
                 boolean ok = lo.hasYear() && hi.hasYear() && lo.qualifier() == GedDate.Qualifier.EXACT
                         && hi.qualifier() == GedDate.Qualifier.EXACT && lo.compareTo(hi) <= 0;
                 yield ok ? new GedDate[] {lo, hi} : null;
