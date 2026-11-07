@@ -1200,7 +1200,7 @@ public final class ChartPage {
     private void fact(Event e, List<List<String>> facts) {
         var detail = e.detail().equalsIgnoreCase("Y") ? "" : e.detail();
         if (notes) {
-            var en = e.node().children().stream().filter(c -> c.tag().equals("NOTE"))
+            var en = e.node().notes()
                     .map(c -> g.noteText(c.value())).filter(s -> !s.isBlank()).collect(Collectors.joining(" "));
             detail = join(" — ", detail, en);
         }
