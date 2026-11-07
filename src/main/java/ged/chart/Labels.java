@@ -134,7 +134,7 @@ public enum Labels {
     /// A full GEDCOM date phrase in plain words: `ABT 12 JUN 1850` → `about 12 Jun 1850`.
     public String fullDate(GedDate d) {
         if (d.isEmpty()) return "";
-        var words = d.raw().replaceAll("@#D[^@]*@\\s*", "").strip();
+        var words = GedDate.withoutCalendars(d.raw());
         if (words.startsWith("(") && words.endsWith(")")) return words.substring(1, words.length() - 1);
         var sb = new StringBuilder();
         for (var w : words.split("\\s+")) {
